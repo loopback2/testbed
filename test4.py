@@ -1,6 +1,8 @@
 import subprocess
 import ipaddress
 import logging
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Logging setup
 logging.basicConfig(filename="ssh_open_devices.log", level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -34,7 +36,10 @@ def run_nmap_scan(ip):
         result = subprocess.run(["nmap", ip, "-p", "22", "-Pn"], capture_output=True, text=True, timeout=5)
         output = result.stdout
 
-        if "22/tcp open ssh" in output:
+        # Use regex to match "22/tcp open ssh" exactly
+        match = re.search(r"22\/tcp\s+open\s+ssh", output)
+
+        if match:
             logging.info(f"{ip} - SSH port is open")
             print(f"✅ {ip} - SSH port is open")
             return ip  # Return IPs where SSH is open
@@ -50,15 +55,21 @@ def run_nmap_scan(ip):
         return None
 
 
-def process_devices(ip_list):
-    """Scans devices using Nmap and logs only those with open SSH ports."""
+def process_devices(ip_list, max_workers=10):
+    """Scans multiple devices concurrently using Nmap and logs only those with open SSH ports."""
     ssh_open_devices = []
 
-    for ip in ip_list:
-        print(f"🔍 Scanning {ip}...")
-        result = run_nmap_scan(ip)
-        if result:
-            ssh_open_devices.append(result)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ip = {executor.submit(run_nmap_scan, ip): ip for ip in ip_list}
+
+        for future in as_completed(future_to_ip):
+            ip = future_to_ip[future]
+            try:
+                result = future.result()
+                if result:
+                    ssh_open_devices.append(result)
+            except Exception as e:
+                logging.info(f"{ip} - Error occurred: {e}")
 
     print(f"\n✅ Total devices with SSH open: {len(ssh_open_devices)}")
     return ssh_open_devices
@@ -68,4 +79,4 @@ def process_devices(ip_list):
 if __name__ == "__main__":
     ip_input = input("Enter IP range or subnet (e.g., '192.168.0.0/24' or '192.168.0.1 - 192.168.0.254'): ")
     ip_list = generate_ip_list(ip_input)
-    ssh_open_devices = process_devices(ip_list)
+    ssh_open_devices = process_devices(ip_list, max_workers=10)  # Adjust workers as needed
