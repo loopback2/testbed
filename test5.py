@@ -68,6 +68,7 @@ def run_nmap_scan(ip):
 
 def ssh_identify_device(ip):
     """Attempts to SSH into a device and determine if it's Juniper, Palo Alto, or Aruba."""
+    client = None
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -90,7 +91,6 @@ def ssh_identify_device(ip):
 
         if time.time() - start_time >= timeout:
             print(f"⚠️ {ip} - CLI did not become ready in time. Skipping...")
-            client.close()
             return "CLI Timeout"
 
         # Run Juniper Identification: "show version"
@@ -100,7 +100,6 @@ def ssh_identify_device(ip):
             juniper_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Juniper**")
             logging.info(f"{ip} - Identified as Juniper")
-            client.close()
             return "Juniper"
 
         # Run Palo Alto Identification: "show system info"
@@ -110,14 +109,12 @@ def ssh_identify_device(ip):
             palo_alto_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Palo Alto**")
             logging.info(f"{ip} - Identified as Palo Alto")
-            client.close()
             return "Palo Alto"
 
         # Aruba Identification: Placeholder
         aruba_devices.append(ip)
         print(f"🔍 {ip} - Identified as **Aruba (Assumed)**")
         logging.info(f"{ip} - Identified as Aruba (Assumed)")
-        client.close()
         return "Aruba"
 
     except paramiko.AuthenticationException:
@@ -128,7 +125,12 @@ def ssh_identify_device(ip):
     except Exception as e:
         print(f"⚠️ {ip} - SSH OS detection failed: {e}")
         return "Unknown"
-    
+    finally:
+        if client:
+            client.close()
+            print(f"🔴 {ip} - SSH session closed.")
+
+
 def process_devices(ip_list, max_workers=10):
     """Scans multiple devices concurrently using Nmap and identifies OS."""
     ssh_open_devices = []
