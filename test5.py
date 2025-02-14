@@ -3,6 +3,7 @@ import ipaddress
 import logging
 import re
 import paramiko
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Logging setup
@@ -70,7 +71,10 @@ def ssh_identify_device(ip):
     try:
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip, username=SSH_USERNAME, password=SSH_PASSWORD, timeout=5)
+        client.connect(ip, username=SSH_USERNAME, password=SSH_PASSWORD, timeout=10)
+
+        print(f"🟢 {ip} - SSH Connected! Waiting for CLI readiness...")
+        time.sleep(7)  # <-- Add a delay to allow CLI to fully load
 
         # Juniper Identification: "show version"
         stdin, stdout, stderr = client.exec_command("show version")
@@ -107,7 +111,6 @@ def ssh_identify_device(ip):
     except Exception as e:
         print(f"⚠️ {ip} - SSH OS detection failed: {e}")
         return "Unknown"
-
 
 def process_devices(ip_list, max_workers=10):
     """Scans multiple devices concurrently using Nmap and identifies OS."""
