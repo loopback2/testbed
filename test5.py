@@ -1,9 +1,8 @@
+from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticationException
 import subprocess
 import ipaddress
 import logging
 import re
-import paramiko
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Logging setup
@@ -40,7 +39,6 @@ def generate_ip_list(ip_input):
         return []
     return ip_list
 
-
 def run_nmap_scan(ip):
     """Runs an Nmap scan on the given IP to check if port 22 is open."""
     try:
@@ -65,71 +63,61 @@ def run_nmap_scan(ip):
         print(f"⚠️ {ip} - Error occurred: {e}")
         return None
 
-
 def ssh_identify_device(ip):
-    """Attempts to SSH into a device and determine if it's Juniper, Palo Alto, or Aruba."""
-    client = None
+    """Uses Netmiko to SSH into a device and determine if it's Juniper, Palo Alto, or Aruba."""
+    device_params = {
+        "device_type": "autodetect",
+        "host": ip,
+        "username": SSH_USERNAME,
+        "password": SSH_PASSWORD,
+        "timeout": 10,
+    }
+
     try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip, username=SSH_USERNAME, password=SSH_PASSWORD, timeout=10)
+        print(f"🟢 {ip} - Connecting via SSH...")
+        net_connect = ConnectHandler(**device_params)
+        print(f"✅ {ip} - Connected successfully!")
 
-        print(f"🟢 {ip} - SSH Connected! Waiting for CLI readiness...")
-
-        channel = client.invoke_shell()
-        buffer = ""
-        timeout = 15  # Max wait time for CLI readiness
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            if channel.recv_ready():
-                buffer += channel.recv(1024).decode("utf-8")
-                if any(prompt in buffer for prompt in ["#", ">", "PA-VM", "admin@"]):  # Expected CLI prompts
-                    print(f"✅ {ip} - CLI Ready!")
-                    break
-            time.sleep(1)  # Wait and re-check buffer
-
-        if time.time() - start_time >= timeout:
-            print(f"⚠️ {ip} - CLI did not become ready in time. Skipping...")
-            return "CLI Timeout"
-
-        # Run Juniper Identification: "show version"
-        stdin, stdout, stderr = client.exec_command("show version")
-        juniper_output = stdout.read().decode()
-        if "JUNOS" in juniper_output or "Junos" in juniper_output:
+        # **Identify Juniper Device**
+        output = net_connect.send_command("show version", read_timeout=5)
+        if "JUNOS" in output or "Junos" in output:
             juniper_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Juniper**")
             logging.info(f"{ip} - Identified as Juniper")
+            net_connect.disconnect()
             return "Juniper"
 
-        # Run Palo Alto Identification: "show system info"
-        stdin, stdout, stderr = client.exec_command("show system info")
-        palo_alto_output = stdout.read().decode()
-        if "sw-version" in palo_alto_output or "paloaltonetworks" in palo_alto_output:
+        # **Identify Palo Alto Device**
+        output = net_connect.send_command("show system info", read_timeout=5)
+        if "sw-version" in output or "paloaltonetworks" in output:
             palo_alto_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Palo Alto**")
             logging.info(f"{ip} - Identified as Palo Alto")
+            net_connect.disconnect()
             return "Palo Alto"
 
-        # Aruba Identification: Placeholder
+        # **Identify Aruba Device**
         aruba_devices.append(ip)
         print(f"🔍 {ip} - Identified as **Aruba (Assumed)**")
         logging.info(f"{ip} - Identified as Aruba (Assumed)")
+        net_connect.disconnect()
         return "Aruba"
 
-    except paramiko.AuthenticationException:
+    except NetmikoAuthenticationException:
         print(f"❌ {ip} - Authentication failed")
         failed_auth_devices.append(ip)
         logging.info(f"{ip} - Authentication failed")
         return "Authentication Failed"
+    except NetmikoTimeoutException:
+        print(f"⚠️ {ip} - Connection timed out")
+        return "Timeout"
     except Exception as e:
         print(f"⚠️ {ip} - SSH OS detection failed: {e}")
         return "Unknown"
     finally:
-        if client:
-            client.close()
+        if "net_connect" in locals():
+            net_connect.disconnect()
             print(f"🔴 {ip} - SSH session closed.")
-
 
 def process_devices(ip_list, max_workers=10):
     """Scans multiple devices concurrently using Nmap and identifies OS."""
@@ -175,9 +163,8 @@ def process_devices(ip_list, max_workers=10):
         "Failed Authentication": failed_auth_devices
     }
 
-
 # Main execution
 if __name__ == "__main__":
-    ip_input = input("Enter IP range or subnet (e.g., '192.168.0.0/24' or '192.168.0.1 - 192.168.0.254'): ")
+    ip_input = input("Enter IP range or subnet: ")
     ip_list = generate_ip_list(ip_input)
     devices = process_devices(ip_list, max_workers=10)
