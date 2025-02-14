@@ -74,9 +74,26 @@ def ssh_identify_device(ip):
         client.connect(ip, username=SSH_USERNAME, password=SSH_PASSWORD, timeout=10)
 
         print(f"🟢 {ip} - SSH Connected! Waiting for CLI readiness...")
-        time.sleep(7)  # <-- Add a delay to allow CLI to fully load
 
-        # Juniper Identification: "show version"
+        channel = client.invoke_shell()
+        buffer = ""
+        timeout = 15  # Max wait time for CLI readiness
+        start_time = time.time()
+
+        while time.time() - start_time < timeout:
+            if channel.recv_ready():
+                buffer += channel.recv(1024).decode("utf-8")
+                if any(prompt in buffer for prompt in ["#", ">", "PA-VM", "admin@"]):  # Expected CLI prompts
+                    print(f"✅ {ip} - CLI Ready!")
+                    break
+            time.sleep(1)  # Wait and re-check buffer
+
+        if time.time() - start_time >= timeout:
+            print(f"⚠️ {ip} - CLI did not become ready in time. Skipping...")
+            client.close()
+            return "CLI Timeout"
+
+        # Run Juniper Identification: "show version"
         stdin, stdout, stderr = client.exec_command("show version")
         juniper_output = stdout.read().decode()
         if "JUNOS" in juniper_output or "Junos" in juniper_output:
@@ -86,7 +103,7 @@ def ssh_identify_device(ip):
             client.close()
             return "Juniper"
 
-        # Palo Alto Identification: "show system info"
+        # Run Palo Alto Identification: "show system info"
         stdin, stdout, stderr = client.exec_command("show system info")
         palo_alto_output = stdout.read().decode()
         if "sw-version" in palo_alto_output or "paloaltonetworks" in palo_alto_output:
@@ -96,7 +113,7 @@ def ssh_identify_device(ip):
             client.close()
             return "Palo Alto"
 
-        # Aruba Identification: TO-DO (For now, just mark Aruba as authenticated but unidentified)
+        # Aruba Identification: Placeholder
         aruba_devices.append(ip)
         print(f"🔍 {ip} - Identified as **Aruba (Assumed)**")
         logging.info(f"{ip} - Identified as Aruba (Assumed)")
@@ -111,7 +128,7 @@ def ssh_identify_device(ip):
     except Exception as e:
         print(f"⚠️ {ip} - SSH OS detection failed: {e}")
         return "Unknown"
-
+    
 def process_devices(ip_list, max_workers=10):
     """Scans multiple devices concurrently using Nmap and identifies OS."""
     ssh_open_devices = []
