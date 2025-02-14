@@ -1,3 +1,4 @@
+import time
 from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticationException
 import subprocess
 import ipaddress
@@ -8,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Logging setup
 logging.basicConfig(filename="device_identification.log", level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# SSH Credentials (Modify as needed)
+# SSH Credentials
 SSH_USERNAME = "admin"
 SSH_PASSWORD = "password"
 
@@ -70,7 +71,8 @@ def ssh_identify_device(ip):
         "host": ip,
         "username": SSH_USERNAME,
         "password": SSH_PASSWORD,
-        "timeout": 10,
+        "timeout": 15,
+        "global_delay_factor": 2,  # Increases wait time for CLI readiness
     }
 
     try:
@@ -78,8 +80,21 @@ def ssh_identify_device(ip):
         net_connect = ConnectHandler(**device_params)
         print(f"✅ {ip} - Connected successfully!")
 
-        # **Identify Juniper Device**
-        output = net_connect.send_command("show version", read_timeout=5)
+        # **Explicit Delay to Ensure CLI is Fully Loaded**
+        time.sleep(5)
+
+        # **Wait for CLI Readiness**
+        max_wait_time = 15
+        start_time = time.time()
+        while time.time() - start_time < max_wait_time:
+            prompt = net_connect.find_prompt()
+            if "#" in prompt or ">" in prompt or "PA-VM" in prompt or "admin@" in prompt:
+                print(f"✅ {ip} - CLI Ready!")
+                break
+            time.sleep(1)
+
+        # Run Juniper Identification: "show version"
+        output = net_connect.send_command("show version", read_timeout=10)
         if "JUNOS" in output or "Junos" in output:
             juniper_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Juniper**")
@@ -87,8 +102,8 @@ def ssh_identify_device(ip):
             net_connect.disconnect()
             return "Juniper"
 
-        # **Identify Palo Alto Device**
-        output = net_connect.send_command("show system info", read_timeout=5)
+        # Run Palo Alto Identification: "show system info"
+        output = net_connect.send_command("show system info", read_timeout=10)
         if "sw-version" in output or "paloaltonetworks" in output:
             palo_alto_devices.append(ip)
             print(f"🔍 {ip} - Identified as **Palo Alto**")
@@ -96,7 +111,7 @@ def ssh_identify_device(ip):
             net_connect.disconnect()
             return "Palo Alto"
 
-        # **Identify Aruba Device**
+        # Aruba Identification (Assumed)
         aruba_devices.append(ip)
         print(f"🔍 {ip} - Identified as **Aruba (Assumed)**")
         logging.info(f"{ip} - Identified as Aruba (Assumed)")
