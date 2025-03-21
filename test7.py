@@ -1,79 +1,56 @@
-import paramiko
-import os
-from tqdm import tqdm
+import argparse
+from utils.inventory_loader import load_inventory
+from utils.pyez_connector import connect_and_get_facts
+from utils.storage_cleanup import run_storage_cleanup
+from utils.scp_transfer import scp_file_to_juniper
 
-def file_exists_on_device(device_info, remote_path):
-    """
-    Check if a file already exists on the Juniper device.
-    """
-    try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(
-            hostname=device_info["ip"],
-            username=device_info["username"],
-            password=device_info["password"]
-        )
+# Parse CLI arguments
+parser = argparse.ArgumentParser(description="Junos OS Upgrade Script")
+parser.add_argument("--skip-cleanup", action="store_true", help="Skip storage cleanup step")
+args = parser.parse_args()
 
-        stdin, stdout, stderr = ssh.exec_command(f"ls {remote_path}")
-        output = stdout.read().decode().strip()
-        ssh.close()
+# Load inventory
+upgrade_version, upgrade_image, device = load_inventory()
+remote_path = f"/var/tmp/{upgrade_image.split('/')[-1]}"
 
-        return remote_path in output  # Returns True if file is found
-    except Exception as e:
-        print(f"[!] Error checking file on device: {e}")
-        return False
+print("\n===============================================")
+print("         Juniper Junos OS Upgrade Tool         ")
+print("===============================================\n")
 
-def scp_file_to_juniper(device_info, local_path, remote_path):
-    """
-    Transfer an upgrade image from Linux to Juniper /var/tmp using SCP.
+print(f"Target Device  : {device['name']} ({device['ip']})")
+print(f"Junos Version  : {upgrade_version}")
+print(f"Upgrade Image  : {upgrade_image}\n")
 
-    Args:
-        device_info (dict): Device connection details.
-        local_path (str): Local path to the Junos image file.
-        remote_path (str): Remote destination path on Juniper.
+# --- Phase 1: Discovery & Cleanup ---
+print("\n--- Phase 1: Discovery & Cleanup ---")
+facts = connect_and_get_facts(device)
 
-    Returns:
-        bool: True if transfer was successful, False otherwise.
-    """
-    try:
-        if file_exists_on_device(device_info, remote_path):
-            print(f"[✓] File already exists on Juniper ({remote_path}). Skipping SCP.")
-            return True
+if facts:
+    print(f"[✓] Connected to {facts['hostname']} | Model: {facts['model']} | Current Version: {facts['version']}")
 
-        print(f"[+] Initiating SCP transfer to {device_info['name']}...")
-
-        # Open SCP connection
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(
-            hostname=device_info["ip"],
-            username=device_info["username"],
-            password=device_info["password"]
-        )
-        sftp = ssh.open_sftp()
-
-        # Get file size for progress bar
-        file_size = os.path.getsize(local_path)
-
-        with tqdm(total=file_size, unit="B", unit_scale=True, desc="SCP Progress") as pbar:
-            def progress_callback(sent, total):
-                pbar.update(sent - pbar.n)
-
-            # Perform SCP transfer
-            sftp.put(local_path, remote_path, callback=progress_callback)
-
-        sftp.close()
-        ssh.close()
-
-        # Verify that the file exists on Juniper after SCP
-        if file_exists_on_device(device_info, remote_path):
-            print(f"[✓] SCP transfer completed successfully. File verified on device.")
-            return True
+    # Run storage cleanup unless skipped via --skip-cleanup
+    if not args.skip_cleanup:
+        print("[+] Performing system storage cleanup...")
+        cleanup_output = run_storage_cleanup(device)
+        if cleanup_output:
+            print(f"[✓] Storage cleanup successful.")
         else:
-            print(f"[!] SCP transfer completed, but file verification failed!")
-            return False
+            print("[!] Storage cleanup failed. Check logs.")
+    else:
+        print("[!] Skipping storage cleanup as per user request.")
+else:
+    print("[!] Could not retrieve device facts. Aborting upgrade.")
+    exit(1)
 
-    except Exception as e:
-        print(f"[!] SCP transfer failed: {e}")
-        return False
+# --- Phase 2: SCP File Transfer ---
+print("\n--- Phase 2: SCP File Transfer ---")
+
+scp_success = scp_file_to_juniper(device, upgrade_image, remote_path)
+
+if scp_success:
+    print(f"[✓] File successfully transferred to {remote_path}.")
+else:
+    print("[!] SCP transfer failed. Check logs.")
+    exit(1)
+
+print("\n[✓] SCP Phase Completed Successfully. Ready for Upgrade.")
