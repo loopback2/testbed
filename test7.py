@@ -1,18 +1,20 @@
 # utils/junos_upgrade.py
 
 from netmiko import ConnectHandler
-from time import sleep
+import datetime
+import os
 
-def install_junos_cli(device_info, remote_image_path):
+def install_junos_cli(device_info, remote_image_path, log_dir="logs"):
     """
-    Uses Netmiko to upgrade Junos OS via CLI with full output visibility.
+    Uses Netmiko to install Junos OS image with full CLI visibility and optional logging.
 
     Args:
         device_info (dict): Device connection info.
-        remote_image_path (str): Full path to the Junos image on the Juniper switch.
+        remote_image_path (str): Full path to image on Juniper device.
+        log_dir (str): Directory to store logs (default: 'logs/').
 
     Returns:
-        bool: True if installation initiated successfully, False if error encountered.
+        bool: True if command executed successfully, False otherwise.
     """
     try:
         print(f"[+] Connecting to {device_info['name']} for CLI-based Junos upgrade...")
@@ -24,31 +26,49 @@ def install_junos_cli(device_info, remote_image_path):
             password=device_info["password"]
         )
 
-        print(f"[+] Sending software install command via CLI...")
+        # Prepare install command
         install_cmd = f"request system software add {remote_image_path} no-copy no-validate"
-        output = connection.send_command_timing(install_cmd)
+        print(f"\n[+] Sending install command:\n    {install_cmd}")
 
-        # Display CLI output line by line for full visibility
-        print("\n[📟] Junos CLI Output:\n" + "-"*50)
-        print(output.strip())
-        print("-"*50 + "\n")
+        # Run install and capture full output
+        output = connection.send_command_timing(install_cmd, strip_prompt=False, strip_command=False)
 
-        # Look for key text to determine if successful
-        if "Reboot the system" in output or "verify the configuration" in output or "installing package" in output.lower():
-            print("[✓] Junos install completed. Manual reboot is now required.")
+        # Optional: wait a moment and collect continued output (if needed)
+        more_output = connection.send_command_timing("", strip_prompt=False)
+        full_output = output + "\n" + more_output
+
+        # Print output to screen
+        print("\n[📟] Junos CLI Output:\n" + "-"*60)
+        print(full_output.strip())
+        print("-"*60 + "\n")
+
+        # Optional: Save output to a log file
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        hostname = device_info["name"].replace(" ", "_")
+        os.makedirs(log_dir, exist_ok=True)
+        logfile = os.path.join(log_dir, f"{hostname}-install-{timestamp}.log")
+
+        with open(logfile, "w") as f:
+            f.write(f"Install command:\n{install_cmd}\n\n")
+            f.write(full_output)
+
+        print(f"[✓] Install output saved to: {logfile}")
+
+        # Basic success signal (could improve this logic later)
+        if "Reboot the system" in full_output or "installing package" in full_output.lower():
+            print("[✓] Install completed. Manual reboot required.")
             return True
-        elif "ERROR" in output or "couldn't" in output.lower():
-            print("[!] Junos install failed. Error detected in output.")
-            return False
         else:
-            print("[!] Install output did not confirm success. Please verify manually.")
+            print("[!] Install output didn't contain expected success message. Review log.")
             return False
 
     except Exception as e:
         print(f"[!] CLI upgrade failed: {e}")
         return False
     
+from utils.junos_upgrade import install_junos_cli
 
+# --- Phase 3: Junos OS Upgrade (CLI-Based) ---
 print("\n--- Phase 3: Junos OS Upgrade ---")
 
 upgrade_success = install_junos_cli(device, remote_path)
