@@ -1,20 +1,21 @@
 # utils/junos_upgrade.py
 
 from netmiko import ConnectHandler
+import time
 import datetime
 import os
 
 def install_junos_cli(device_info, remote_image_path, log_dir="logs"):
     """
-    Uses Netmiko to install Junos OS image with full CLI visibility and optional logging.
+    Executes 'request system software add' via CLI and captures full output.
 
     Args:
-        device_info (dict): Device connection info.
-        remote_image_path (str): Full path to image on Juniper device.
-        log_dir (str): Directory to store logs (default: 'logs/').
+        device_info (dict): Connection info
+        remote_image_path (str): e.g. /var/tmp/junos-install.tgz
+        log_dir (str): Folder for logs (default: logs/)
 
     Returns:
-        bool: True if command executed successfully, False otherwise.
+        bool: True if install completed successfully
     """
     try:
         print(f"[+] Connecting to {device_info['name']} for CLI-based Junos upgrade...")
@@ -26,54 +27,56 @@ def install_junos_cli(device_info, remote_image_path, log_dir="logs"):
             password=device_info["password"]
         )
 
-        # Prepare install command
-        install_cmd = f"request system software add {remote_image_path} no-copy no-validate"
-        print(f"\n[+] Sending install command:\n    {install_cmd}")
+        command = f"request system software add {remote_image_path} no-copy no-validate"
+        print(f"\n[+] Sending install command:\n    {command}\n")
 
-        # Run install and capture full output
-        output = connection.send_command_timing(install_cmd, strip_prompt=False, strip_command=False)
+        # Send the command and get into interactive mode
+        connection.write_channel(command + "\n")
+        time.sleep(1)
 
-        # Optional: wait a moment and collect continued output (if needed)
-        more_output = connection.send_command_timing("", strip_prompt=False)
-        full_output = output + "\n" + more_output
+        full_output = ""
+        timeout = 120  # max time to collect output
+        start_time = time.time()
 
-        # Print output to screen
-        print("\n[📟] Junos CLI Output:\n" + "-"*60)
-        print(full_output.strip())
-        print("-"*60 + "\n")
+        while True:
+            if time.time() - start_time > timeout:
+                print("[!] Timeout reached while waiting for install output.")
+                break
 
-        # Optional: Save output to a log file
+            # Read any available output
+            out = connection.read_channel()
+            if out:
+                print(out, end="")  # live display
+                full_output += out
+
+                # Look for known completion string
+                if "pending will be activated" in out or "Reboot the system" in out:
+                    break
+
+            time.sleep(1)
+
+        # Final prompt read
+        full_output += connection.read_channel()
+
+        # Save full output to log
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         hostname = device_info["name"].replace(" ", "_")
         os.makedirs(log_dir, exist_ok=True)
-        logfile = os.path.join(log_dir, f"{hostname}-install-{timestamp}.log")
+        log_path = os.path.join(log_dir, f"{hostname}-install-{timestamp}.log")
 
-        with open(logfile, "w") as f:
-            f.write(f"Install command:\n{install_cmd}\n\n")
+        with open(log_path, "w") as f:
+            f.write(f"Command: {command}\n\n")
             f.write(full_output)
 
-        print(f"[✓] Install output saved to: {logfile}")
+        print(f"\n[✓] Full install session saved to: {log_path}")
 
-        # Basic success signal (could improve this logic later)
-        if "Reboot the system" in full_output or "installing package" in full_output.lower():
-            print("[✓] Install completed. Manual reboot required.")
+        if "pending will be activated" in full_output:
+            print("[✓] Junos install completed. Manual reboot required.")
             return True
         else:
-            print("[!] Install output didn't contain expected success message. Review log.")
+            print("[!] Install output captured, but success marker not found. Please verify manually.")
             return False
 
     except Exception as e:
-        print(f"[!] CLI upgrade failed: {e}")
+        print(f"[!] Exception during CLI install: {e}")
         return False
-    
-from utils.junos_upgrade import install_junos_cli
-
-# --- Phase 3: Junos OS Upgrade (CLI-Based) ---
-print("\n--- Phase 3: Junos OS Upgrade ---")
-
-upgrade_success = install_junos_cli(device, remote_path)
-
-if upgrade_success:
-    print(f"[✓] Junos OS upgrade process completed. Please review output above and manually reboot when ready.")
-else:
-    print("[!] Junos upgrade failed or uncertain. Check the CLI output above and logs for more info.")
