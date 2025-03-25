@@ -1,23 +1,19 @@
+# utils/reboot_monitor.py
+
 from netmiko import ConnectHandler
 import time
-import datetime
-import os
+import subprocess
 
 
-def install_junos_cli(device_info, remote_image_path, log_dir="logs"):
+def trigger_reboot(device_info):
     """
-    Uses Netmiko to install Junos OS via CLI with full output visibility and logs.
+    Triggers a reboot using 'request system reboot at now'.
 
     Args:
-        device_info (dict): Connection information for the device
-        remote_image_path (str): Path to the image on the Juniper device (/var/tmp/...)
-        log_dir (str): Directory where CLI output logs will be stored
-
-    Returns:
-        bool: True if install completed successfully, False otherwise
+        device_info (dict): Connection info for the Junos device.
     """
     try:
-        print(f"[+] Connecting to {device_info['name']} for CLI-based Junos upgrade...")
+        print(f"\n[↻] Sending reboot command to {device_info['name']}...")
 
         connection = ConnectHandler(
             device_type="juniper",
@@ -26,67 +22,92 @@ def install_junos_cli(device_info, remote_image_path, log_dir="logs"):
             password=device_info["password"]
         )
 
-        command = f"request system software add {remote_image_path} no-copy no-validate"
-        print(f"\n[+] Sending install command:\n    {command}\n")
+        reboot_cmd = "request system reboot at now"
+        output = connection.send_command_timing(reboot_cmd)
+        print(f"\n[📟] Reboot Output:\n{output.strip()}\n")
 
-        # Send the install command and begin watching output
-        connection.write_channel(command + "\n")
-        time.sleep(1)
+        print("[✓] Reboot command sent successfully. Closing session.")
+        connection.disconnect()
 
-        full_output = ""
-        timeout = 180  # seconds to wait for output completion
-        start_time = time.time()
-
-        # Define known success markers
-        success_phrases = [
-            "pending will be activated",
-            "pending set will be activated",
-            "set will be activated",
-            "activated at next reboot",
-            "notice: 'pending'",
-        ]
-
-        while True:
-            if time.time() - start_time > timeout:
-                print("[!] Timeout reached while waiting for install output.")
-                break
-
-            # Read output from device
-            out = connection.read_channel()
-            if out:
-                print(out, end="")  # live terminal-style output
-                full_output += out
-
-                # Check if we found a known success message
-                if any(phrase in out.lower() for phrase in success_phrases):
-                    print("\n[✓] Found success marker in output.")
-                    break
-
-            time.sleep(1)
-
-        # Final buffer flush
-        full_output += connection.read_channel()
-
-        # Prepare log path
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        hostname = device_info["name"].replace(" ", "_")
-        os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, f"{hostname}-install-{timestamp}.log")
-
-        with open(log_path, "w") as f:
-            f.write(f"Command: {command}\n\n")
-            f.write(full_output)
-
-        print(f"\n[✓] Full install session saved to: {log_path}")
-
-        # Confirm successful upgrade
-        if any(phrase in full_output.lower() for phrase in success_phrases):
-            print("[✓] Junos install completed successfully. Manual reboot required.")
-            return True
-        else:
-            print("[!] Install output captured, but success marker not found. Please verify manually.")
-            return False
+        return True
 
     except Exception as e:
-        print(f"[!] Exception during CLI install: {e}")
+        print(f"[!] Failed to send reboot command: {e}")
         return False
+
+
+def monitor_ssh_status(ip, check_interval=10, timeout=600):
+    """
+    Monitors SSH (port 22) status using nmap.
+    Waits until port 22 is detected as 'open'.
+
+    Args:
+        ip (str): IP address of the device to check
+        check_interval (int): Time in seconds between checks
+        timeout (int): Max time to wait (in seconds)
+
+    Returns:
+        bool: True if SSH came back up, False if timeout hit
+    """
+    print(f"\n[🔍] Waiting 10 seconds for device to begin shutdown...")
+    time.sleep(10)
+
+    print(f"[📡] Monitoring SSH (port 22) status for {ip}...\n")
+    previous_state = None
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        try:
+            result = subprocess.run(
+                ["nmap", "-p", "22", "-Pn", ip],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+
+            if "22/tcp open" in result.stdout:
+                current_state = "open"
+            elif "22/tcp filtered" in result.stdout or "22/tcp closed" in result.stdout:
+                current_state = "down"
+            else:
+                current_state = "unknown"
+
+            # Only print when state changes
+            if current_state != previous_state:
+                timestamp = time.strftime('%H:%M:%S')
+                if current_state == "open":
+                    print(f"[{timestamp}] [✓] SSH is now reachable on {ip}.")
+                    return True
+                elif current_state == "down":
+                    print(f"[{timestamp}] [!] SSH is down. Waiting for reboot...")
+                else:
+                    print(f"[{timestamp}] [!] Unknown SSH state.")
+
+            previous_state = current_state
+            time.sleep(check_interval)
+
+        except subprocess.TimeoutExpired:
+            print(f"[!] Nmap timed out while scanning {ip}. Retrying...")
+        except Exception as e:
+            print(f"[!] Error during SSH monitoring: {e}")
+
+    print(f"[!] Timeout reached. Device did not come back online within {timeout} seconds.")
+    return False
+
+
+from utils.reboot_monitor import trigger_reboot, monitor_ssh_status
+
+# --- Phase 4: Reboot & Monitoring ---
+print("\n--- Phase 4: Reboot & SSH Monitoring ---")
+
+# Send reboot command
+if trigger_reboot(device):
+    print("[...] Reboot initiated. Monitoring SSH availability...")
+    reboot_success = monitor_ssh_status(device["ip"])
+    
+    if reboot_success:
+        print("[✓] Device is back online. Proceeding to post-upgrade verification.")
+    else:
+        print("[!] Device did not return within expected time. Manual check required.")
+else:
+    print("[!] Reboot could not be triggered. Skipping monitoring phase.")
