@@ -1,69 +1,50 @@
-from netmiko import ConnectHandler
-import time
+from jnpr.junos import Device
 from utils.logger import log_to_file, create_phase_log_file
 
 
-def install_junos_cli(device_info, remote_image_path):
+def verify_post_upgrade(device_info, target_version):
     """
-    Executes the Junos software install command via Netmiko, streams real-time output.
+    Verifies the Junos version using PyEZ after reboot.
 
     Returns:
-        bool: True if install completed with success pattern, False otherwise.
+        bool: True if version matches target, False otherwise.
     """
-    print("\n--- Phase 3: Junos OS Upgrade (CLI-Based) ---")
-    print(f"[🛠️] Connecting to {device_info['name']} for CLI-based Junos upgrade...\n")
+    print("\n--- Phase 5: Post-Upgrade Verification ---")
+    print("[🛠️] Verifying Junos version after reboot...\n")
 
     try:
-        connection = ConnectHandler(
-            device_type="juniper",
+        with Device(
             host=device_info["ip"],
-            username=device_info["username"],
-            password=device_info["password"]
-        )
+            user=device_info["username"],
+            passwd=device_info["password"],
+            gather_facts=True,
+            timeout=60
+        ) as dev:
 
-        command = f"request system software add {remote_image_path} no-copy no-validate"
-        print(f"[→] Sending install command:\n{command}\n")
+            hostname = dev.facts.get("hostname", "unknown")
+            current_version = dev.facts.get("version", "unknown")
 
-        connection.write_channel(command + "\n")
-        time.sleep(1)
+            log_output = (
+                f"Hostname       : {hostname}\n"
+                f"Current Version: {current_version}\n"
+                f"Target Version : {target_version}"
+            )
 
-        output_log = ""
-        timeout = 300  # 5 minutes
-        start_time = time.time()
+            print(f"[📟] Hostname        : {hostname}")
+            print(f"[📦] Current Version : {current_version}")
+            print(f"[🎯] Target Version  : {target_version}")
 
-        while True:
-            if time.time() - start_time > timeout:
-                print("[✖] Timeout reached while waiting for install output.")
-                break
+            log_path = create_phase_log_file(device_info["name"], "post-verify")
+            log_to_file(log_path, log_output)
+            print(f"[💾] Verification output saved to: {log_path}")
 
-            out = connection.read_channel()
-            if out:
-                print(out, end="")  # Live display
-                output_log += out
-
-                if "will be activated at next reboot" in out or \
-                   "set will be activated at next reboot" in out:
-                    break
-
-            time.sleep(0.5)
-
-        # Final output read
-        output_log += connection.read_channel()
-        connection.disconnect()
-
-        # Save to log
-        log_path = create_phase_log_file(device_info["name"], "install")
-        log_to_file(log_path, output_log)
-        print(f"\n[💾] Full install session saved to: {log_path}")
-
-        if "will be activated at next reboot" in output_log or \
-           "set will be activated at next reboot" in output_log:
-            print("[✅] Junos upgrade process completed successfully.")
-            return True
-        else:
-            print("[✖] Install output captured, but success marker not found.")
-            return False
+            if current_version == target_version:
+                print(f"[✅] Device successfully upgraded to {current_version}.\n")
+                return True
+            else:
+                print("[✖] Version mismatch! Upgrade may have failed.")
+                return False
 
     except Exception as e:
-        print(f"[✖] Junos upgrade failed: {e}")
+        print(f"[✖] Post-upgrade verification failed: {e}")
         return False
