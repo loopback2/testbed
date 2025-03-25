@@ -1,42 +1,13 @@
-from jnpr.junos import Device
+# Phase 4: Reboot + SSH Monitoring
+print("\n--- Phase 4: Reboot & SSH Monitoring ---")
+if trigger_reboot(device_info):
+    if monitor_ssh_status(device_info["ip"]):
+        
+        # ✅ Phase 5: Post-Upgrade Verification
+        print("\n--- Phase 5: Post-Upgrade Verification ---")
+        verify_post_upgrade(device_info, target_version)
 
-
-def verify_post_upgrade(device_info, target_version):
-    """
-    Verifies the Junos version after reboot using PyEZ.
-
-    Args:
-        device_info (dict): Device info with IP, username, password, etc.
-        target_version (str): The Junos version we expect after upgrade.
-
-    Returns:
-        bool: True if upgrade was successful, False otherwise.
-    """
-    print("\n[🛠️] Verifying Junos version after reboot...")
-
-    try:
-        with Device(
-            host=device_info["ip"],
-            user=device_info["username"],
-            passwd=device_info["password"],
-            gather_facts=True,
-            timeout=60
-        ) as dev:
-
-            hostname = dev.facts.get("hostname", "unknown")
-            current_version = dev.facts.get("version", "unknown")
-
-            print(f"[📟] Hostname: {hostname}")
-            print(f"[📦] Current Version: {current_version}")
-            print(f"[🎯] Target Version:  {target_version}")
-
-            if current_version == target_version:
-                print(f"[✅] Device successfully upgraded to {current_version}.")
-                return True
-            else:
-                print(f"[❌] Version mismatch! Upgrade may have failed.")
-                return False
-
-    except Exception as e:
-        print(f"[!] Post-upgrade verification failed: {e}")
-        return False
+    else:
+        print("[!] Device did not come back online. Cannot verify upgrade.")
+else:
+    print("[!] Reboot aborted. Skipping verification.")
