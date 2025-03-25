@@ -1,50 +1,74 @@
-from jnpr.junos import Device
-from utils.logger import log_to_file, create_phase_log_file
+from utils.inventory_loader import load_inventory
+from utils.storage_cleanup import perform_storage_cleanup
+from utils.scp_transfer import scp_image_to_device
+from utils.install_junos_cli import install_junos_cli
+from utils.reboot_monitor import trigger_reboot, monitor_ssh_status
+from utils.post_upgrade_verification import verify_post_upgrade
+from utils.logger import get_timestamp
+import argparse
 
 
-def verify_post_upgrade(device_info, target_version):
-    """
-    Verifies the Junos version using PyEZ after reboot.
+def main():
+    print("\n==============================")
+    print("  Juniper Junos OS Upgrade Tool")
+    print("==============================")
 
-    Returns:
-        bool: True if version matches target, False otherwise.
-    """
-    print("\n--- Phase 5: Post-Upgrade Verification ---")
-    print("[🛠️] Verifying Junos version after reboot...\n")
+    # --- Load Inventory ---
+    inventory_data = load_inventory("config/inventory.yml")
+    device = inventory_data["device"]
+    target_version = inventory_data["upgrade_version"]
+    local_image_path = inventory_data["upgrade_image"]
+    remote_image_path = f"/var/tmp/{local_image_path.split('/')[-1]}"
 
-    try:
-        with Device(
-            host=device_info["ip"],
-            user=device_info["username"],
-            passwd=device_info["password"],
-            gather_facts=True,
-            timeout=60
-        ) as dev:
+    print(f"\nTarget Device : {device['name']} ({device['ip']})")
+    print(f"Junos Version : {target_version}")
+    print(f"Upgrade Image : {local_image_path}")
 
-            hostname = dev.facts.get("hostname", "unknown")
-            current_version = dev.facts.get("version", "unknown")
+    # --- Handle optional CLI args ---
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-cleanup", action="store_true", help="Skip storage cleanup")
+    args = parser.parse_args()
 
-            log_output = (
-                f"Hostname       : {hostname}\n"
-                f"Current Version: {current_version}\n"
-                f"Target Version : {target_version}"
-            )
+    # --- Phase 1: Discovery & Cleanup ---
+    print("\n--- Phase 1: Discovery & Cleanup ---")
+    if args.skip_cleanup:
+        print("[↷] Skipping storage cleanup as per user request.")
+    else:
+        cleanup_success = perform_storage_cleanup(device)
+        if not cleanup_success:
+            print("[✖] Storage cleanup failed. Aborting upgrade.")
+            return
 
-            print(f"[📟] Hostname        : {hostname}")
-            print(f"[📦] Current Version : {current_version}")
-            print(f"[🎯] Target Version  : {target_version}")
+    # --- Phase 2: SCP File Transfer ---
+    print("\n--- Phase 2: SCP File Transfer ---")
+    scp_success = scp_image_to_device(device, local_image_path, remote_image_path)
+    if not scp_success:
+        print("[✖] SCP transfer failed. Aborting upgrade.")
+        return
+    print("[✓] SCP Phase Completed Successfully. Ready for Upgrade.")
 
-            log_path = create_phase_log_file(device_info["name"], "post-verify")
-            log_to_file(log_path, log_output)
-            print(f"[💾] Verification output saved to: {log_path}")
+    # --- Phase 3: Junos OS Upgrade ---
+    upgrade_success = install_junos_cli(device, remote_image_path)
+    if not upgrade_success:
+        print("[✖] Junos upgrade failed or uncertain. Check output above and logs.")
+        return
 
-            if current_version == target_version:
-                print(f"[✅] Device successfully upgraded to {current_version}.\n")
-                return True
-            else:
-                print("[✖] Version mismatch! Upgrade may have failed.")
-                return False
+    # --- Phase 4: Reboot & Monitoring ---
+    print("\n--- Phase 4: Reboot & SSH Monitoring ---")
+    if trigger_reboot(device):
+        print("[→] Reboot initiated. Monitoring SSH availability...")
+        reboot_success = monitor_ssh_status(device["ip"])
 
-    except Exception as e:
-        print(f"[✖] Post-upgrade verification failed: {e}")
-        return False
+        if reboot_success:
+            print("[✓] Device is back online. Proceeding to post-upgrade verification.")
+
+            # --- Phase 5: Post-Upgrade Verification ---
+            verify_post_upgrade(device, target_version)
+        else:
+            print("[✖] Device did not return within expected time. Manual check required.")
+    else:
+        print("[✖] Reboot could not be triggered. Skipping monitoring phase.")
+
+
+if __name__ == "__main__":
+    main()
