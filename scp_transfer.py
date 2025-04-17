@@ -4,17 +4,6 @@ from tqdm import tqdm
 from datetime import datetime
 
 
-# Mapping Junos model names to image folder names
-MODEL_FOLDER_MAP = {
-    "QFX5120-48Y": "QFX5120-Y",
-    "QFX5120-48YM-8C": "QFX5120-YM",
-    "EX4300-48P": "EX4300",
-    "EX4300": "EX4300",
-    "EX4400-48T": "EX4400",
-    "EX4400": "EX4400"
-}
-
-
 def log_output(device_name, phase, content):
     """
     Saves output to logs/<device>-<phase>-<timestamp>.log
@@ -30,9 +19,21 @@ def log_output(device_name, phase, content):
 
 def get_image_folder_for_model(model):
     """
-    Maps detected model to correct subfolder name in images directory.
+    Dynamically maps detected Junos model to the correct image folder name.
+    Prioritizes 'YM' before 'Y' for QFX5120 variants to avoid overlap.
     """
-    return MODEL_FOLDER_MAP.get(model)
+    model = model.upper()
+
+    if "QFX5120" in model and "YM" in model:
+        return "QFX5120-YM"
+    elif "QFX5120" in model and "Y" in model:
+        return "QFX5120-Y"
+    elif "EX4300" in model:
+        return "EX4300"
+    elif "EX4400" in model:
+        return "EX4400"
+    else:
+        return None
 
 
 def list_images_in_folder(image_folder):
@@ -66,18 +67,21 @@ def prompt_user_to_select_image(images):
 def scp_image_to_device(device, model):
     """
     Transfers the selected image to /var/tmp on the target device using Paramiko + SCP.
+    Skips transfer if file already exists on the device.
     """
     print("\n--- Phase 2: SCP File Transfer ---")
 
-    # Step 1: Map model to image folder
+    # Step 1: Determine image folder from model
     image_root = "/home/jpando/images"
     model_folder = get_image_folder_for_model(model)
+
     if not model_folder:
         print(f"[✖] Unsupported model: {model}")
         return False
 
     full_folder_path = os.path.join(image_root, model_folder)
     available_images = list_images_in_folder(full_folder_path)
+
     if not available_images:
         print(f"[✖] No images found in: {full_folder_path}")
         return False
@@ -87,8 +91,8 @@ def scp_image_to_device(device, model):
     local_image_path = os.path.join(full_folder_path, selected_image)
     remote_image_path = f"/var/tmp/{selected_image}"
 
-    # Step 3: Begin SCP transfer using Paramiko
     try:
+        # Step 3: Begin SCP transfer with Paramiko
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
@@ -101,17 +105,16 @@ def scp_image_to_device(device, model):
 
         sftp = ssh.open_sftp()
 
-        # Check if file already exists
+        # Step 4: Check if file already exists on remote
         try:
             sftp.stat(remote_image_path)
             print(f"[✓] File already exists on device. Skipping transfer.")
             return True
         except IOError:
-            pass  # File does not exist — continue transfer
+            pass  # File not found — proceed with upload
 
         print(f"[→] Transferring file: {selected_image} → {remote_image_path}")
 
-        # Start upload with progress bar
         file_size = os.path.getsize(local_image_path)
         with tqdm(total=file_size, unit="B", unit_scale=True, desc="Uploading") as progress:
             with open(local_image_path, "rb") as src, sftp.open(remote_image_path, "wb") as dest:
