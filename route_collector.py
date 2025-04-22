@@ -1,47 +1,31 @@
-import jxmlease
 from jnpr.junos.exception import RpcError
 
 def get_bgp_peers_summary(dev):
     """
-    Get BGP summary info from the device using RPC and return a list of peer dictionaries.
-    Includes debug output to inspect raw RPC response and troubleshoot malformed XML.
+    Use PyEZ's native .to_dict() method to retrieve and parse BGP summary info.
+    Returns a list of BGP peer dictionaries.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
         response = dev.rpc.get_bgp_summary_information()
+        
+        # Convert to Python dict using PyEZ native method
+        data = response.to_dict()
 
-        # Convert to string and preview the response
-        xml_str = str(response)
-        print("\n🧪 RAW RPC RESPONSE (first 500 chars):")
-        print(xml_str[:500])
-
-        # Save raw XML to file for deeper inspection
-        with open("raw_bgp_summary.xml", "w") as f:
-            f.write(xml_str)
-
-        print("📄 Parsing XML with jxmlease...")
-        parser = jxmlease.Parser()
-        data = parser(xml_str)
-
-        # Print top-level keys to verify structure
+        # Debug: top-level keys
         print(f"🧪 Top-level keys: {list(data.keys())}")
 
         bgp_info = data.get("bgp-information")
-        print("🧪 Raw 'bgp-information':")
+        print("🧪 bgp-information block:")
         print(bgp_info)
 
-        if not bgp_info:
-            print("⚠️ 'bgp-information' block not found in parsed data.")
+        if not bgp_info or "bgp-peer" not in bgp_info:
+            print("⚠️ No 'bgp-peer' block found in response.")
             return []
 
-        peers_raw = bgp_info.get("bgp-peer")
-        print("🧪 Raw 'bgp-peer':")
-        print(peers_raw)
-
-        if not peers_raw:
-            print("⚠️ 'bgp-peer' block not found.")
-            return []
-
+        peers_raw = bgp_info["bgp-peer"]
+        
+        # If there's only one peer, convert it to a list for consistency
         if not isinstance(peers_raw, list):
             peers_raw = [peers_raw]
 
@@ -68,5 +52,5 @@ def get_bgp_peers_summary(dev):
         print(f"[!] RPC Error: {e}")
         return []
     except Exception as e:
-        print(f"[!] Failed to parse XML: {e}")
+        print(f"[!] Unexpected error: {e}")
         return []
