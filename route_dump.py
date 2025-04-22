@@ -6,6 +6,7 @@ import jxmlease
 def extract_destinations_from_rib(xml_data, expected_table):
     """
     Parses XML and extracts route destinations with next hops from the matching rib table.
+    Returns a list of strings and a count of valid routes.
     """
     try:
         parsed = jxmlease.parse(xml_data)
@@ -36,9 +37,9 @@ def extract_destinations_from_rib(xml_data, expected_table):
 
                     matched_routes.append(f"- {dest}, Next hop: {nh_to}")
 
-        return matched_routes or ["[!] No routes found in matching rib."]
+        return matched_routes, len(matched_routes)
     except Exception as e:
-        return [f"[!] Error extracting routes: {e}"]
+        return [f"[!] Error extracting routes: {e}"], 0
 
 
 def collect_routes(dev, peers, hostname, timestamp):
@@ -54,16 +55,14 @@ def collect_routes(dev, peers, hostname, timestamp):
             peer_ip = peer["peer_ip"]
             rib = peer["rib_table"]
 
-            f.write(f"== Peer: {peer_ip} | Table: {rib or 'N/A'} ==\n")
-
             if not rib or rib == "N/A":
-                msg = f"[!] Skipping {peer_ip} — no rib table defined.\n"
-                print(msg.strip())
-                f.write(msg + "\n")
+                msg = f"== Peer: {peer_ip} | Table: N/A | Routes: 0 ==\n"
+                print(f"[!] Skipping {peer_ip} — no rib table defined.")
+                f.write(msg)
+                f.write("[!] Skipped — no rib table defined.\n")
                 f.write("=" * 60 + "\n\n")
                 continue
 
-            f.write("\n--- RECEIVED ROUTES ---\n")
             try:
                 rpc = dev.rpc.get_route_information(
                     receive_protocol_name="bgp",
@@ -71,15 +70,20 @@ def collect_routes(dev, peers, hostname, timestamp):
                     table=rib
                 )
                 rpc_xml = etree.tostring(rpc, pretty_print=True, encoding="unicode")
-                routes = extract_destinations_from_rib(rpc_xml, rib)
+                routes, route_count = extract_destinations_from_rib(rpc_xml, rib)
 
+                f.write(f"== Peer: {peer_ip} | Table: {rib} | Routes: {route_count} ==\n")
+                f.write("\n--- RECEIVED ROUTES ---\n")
                 for route in routes:
                     f.write(f"{route}\n")
-                print(f"📥 Received routes collected for {peer_ip}")
+
+                print(f"📥 Received routes collected for {peer_ip} ({route_count} routes)")
 
             except RpcError as e:
                 msg = f"[!] Failed to get received routes for {peer_ip}: {e}"
                 print(msg)
+                f.write(f"== Peer: {peer_ip} | Table: {rib} | Routes: 0 ==\n")
+                f.write("\n--- RECEIVED ROUTES ---\n")
                 f.write(msg + "\n")
 
             f.write("=" * 60 + "\n\n")
