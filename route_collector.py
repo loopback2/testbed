@@ -1,47 +1,42 @@
 from jnpr.junos.exception import RpcError
+from lxml import etree
+import jxmlease
 
 def get_bgp_peers_summary(dev):
     """
-    Use PyEZ's native .to_dict() method to retrieve and parse BGP summary info.
-    Returns a list of BGP peer dictionaries.
+    Run <get-bgp-summary-information/> RPC, flatten XML, and parse using jxmlease.
+    Returns a list of structured peer summaries.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
-        response = dev.rpc.get_bgp_summary_information()
-        
-        # Convert to Python dict using PyEZ native method
-        data = response.to_dict()
+        rpc = dev.rpc.get_bgp_summary_information()
+        rpc_xml = etree.tostring(rpc, pretty_print=True, encoding="unicode")
 
-        # Debug: top-level keys
-        print(f"🧪 Top-level keys: {list(data.keys())}")
+        # Debug: print first few characters
+        print("\n🧪 Flattened XML (start):")
+        print(rpc_xml[:500])
 
-        bgp_info = data.get("bgp-information")
-        print("🧪 bgp-information block:")
-        print(bgp_info)
+        # Parse with jxmlease
+        result = jxmlease.parse(rpc_xml)
 
-        if not bgp_info or "bgp-peer" not in bgp_info:
-            print("⚠️ No 'bgp-peer' block found in response.")
-            return []
-
-        peers_raw = bgp_info["bgp-peer"]
-        
-        # If there's only one peer, convert it to a list for consistency
-        if not isinstance(peers_raw, list):
-            peers_raw = [peers_raw]
+        # Dive into result
+        bgp_peers = result.get("bgp-information", {}).get("bgp-peer", [])
+        if not isinstance(bgp_peers, list):
+            bgp_peers = [bgp_peers]
 
         peers = []
-        for peer in peers_raw:
+        for peer in bgp_peers:
             peer_dict = {
-                "peer_ip": peer.get("peer-address"),
-                "group": peer.get("peer-group"),
-                "peer_as": peer.get("peer-as"),
-                "instance": peer.get("bgp-rib", {}).get("@name") if "bgp-rib" in peer else None,
-                "type": peer.get("peer-type"),
-                "state": peer.get("peer-state"),
-                "active_prefixes": peer.get("active-prefix-count"),
-                "received_prefixes": peer.get("received-prefix-count"),
-                "accepted_prefixes": peer.get("accepted-prefix-count"),
-                "advertised_prefixes": peer.get("advertised-prefix-count"),
+                "peer_ip": peer.get("peer-address", "N/A"),
+                "group": peer.get("peer-group", "N/A"),
+                "peer_as": peer.get("peer-as", "N/A"),
+                "instance": peer.get("bgp-rib", {}).get("@name") if "bgp-rib" in peer else "N/A",
+                "type": peer.get("peer-type", "N/A"),
+                "state": peer.get("peer-state", "N/A"),
+                "active_prefixes": peer.get("active-prefix-count", "N/A"),
+                "received_prefixes": peer.get("received-prefix-count", "N/A"),
+                "accepted_prefixes": peer.get("accepted-prefix-count", "N/A"),
+                "advertised_prefixes": peer.get("advertised-prefix-count", "N/A"),
             }
             peers.append(peer_dict)
 
@@ -52,5 +47,5 @@ def get_bgp_peers_summary(dev):
         print(f"[!] RPC Error: {e}")
         return []
     except Exception as e:
-        print(f"[!] Unexpected error: {e}")
+        print(f"[!] Unexpected error while parsing BGP summary: {e}")
         return []
