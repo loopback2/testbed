@@ -4,13 +4,14 @@ from jnpr.junos.exception import RpcError
 def get_bgp_peers_summary(dev):
     """
     Get BGP summary info from the device using RPC and return a list of peer dictionaries.
+    Debug prints added for troubleshooting.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
         response = dev.rpc.get_bgp_summary_information()
         xml_str = str(response)
 
-        # Optional: save raw XML for troubleshooting
+        # Optional: save raw XML for inspection
         with open("raw_bgp_summary.xml", "w") as f:
             f.write(xml_str)
 
@@ -18,17 +19,36 @@ def get_bgp_peers_summary(dev):
         parser = jxmlease.Parser()
         data = parser(xml_str)
 
-        summary_info = data.get("bgp-information", {}).get("bgp-peer", [])
-        if not isinstance(summary_info, list):
-            summary_info = [summary_info]
+        # 🧪 Debug print: show top-level keys
+        print(f"🧪 Top-level keys: {list(data.keys())}")
+
+        bgp_info = data.get("bgp-information")
+        print("🧪 Raw 'bgp-information':")
+        print(bgp_info)
+
+        if not bgp_info:
+            print("⚠️ 'bgp-information' block not found in parsed data.")
+            return []
+
+        peers_raw = bgp_info.get("bgp-peer")
+        print("🧪 Raw 'bgp-peer':")
+        print(peers_raw)
+
+        if not peers_raw:
+            print("⚠️ 'bgp-peer' block not found.")
+            return []
+
+        # If it's a single dict, wrap in list
+        if not isinstance(peers_raw, list):
+            peers_raw = [peers_raw]
 
         peers = []
-        for peer in summary_info:
+        for peer in peers_raw:
             peer_dict = {
                 "peer_ip": peer.get("peer-address"),
                 "group": peer.get("peer-group"),
                 "peer_as": peer.get("peer-as"),
-                "instance": peer.get("bgp-rib", {}).get("@name"),
+                "instance": peer.get("bgp-rib", {}).get("@name") if "bgp-rib" in peer else None,
                 "type": peer.get("peer-type"),
                 "state": peer.get("peer-state"),
                 "active_prefixes": peer.get("active-prefix-count"),
