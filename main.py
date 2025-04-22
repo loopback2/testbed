@@ -1,5 +1,6 @@
 from device_handler import load_device_from_yaml, connect_to_device
 from route_collector import get_bgp_peers_summary
+from datetime import datetime
 
 def main():
     print("📁 Loading YAML...")
@@ -18,28 +19,41 @@ def main():
         print("[!] Connection failed.")
         return
 
+    dev_hostname = dev.facts.get("hostname", device["host"])
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    summary_filename = f"{dev_hostname}-BGP-Summary-{timestamp}.txt"
+
     print("📊 Gathering BGP peer summary and neighbor info...")
     peers = get_bgp_peers_summary(dev)
 
     if peers:
         print("\n=== BGP PEER SUMMARY ===")
-        for peer in peers:
-            print(f"Peer IP: {peer['peer_ip']}")
-            print(f"  State: {peer['state']}")
-            print(f"  Elapsed Time: {peer['elapsed_time']}")
-            print(f"  Peer Type: {peer['peer_type']}")
-            print(f"  Peer Group: {peer['peer_group']}")
-            print(f"  Routing-Instance: {peer['peer_rti']}")
-            print(f"  Peer ASN: {peer['peer_as']}")
-            print(f"  Local ASN: {peer['local_as']}")
-            print(f"  Local Address: {peer['local_address']}")
-            print(f"  Prefixes:")
-            print(f"    Received: {peer['received_prefixes']}")
-            print(f"    Accepted: {peer['accepted_prefixes']}")
-            print(f"    Advertised: {peer['advertised_prefixes']}")
-            print(f"    Active: {peer['active_prefixes']}")
-            print(f"    Suppressed: {peer['suppressed_prefixes']}")
-            print("-" * 60)
+        with open(summary_filename, "w") as f:
+            f.write(f"BGP Peer Summary for {dev_hostname} ({device['host']})\n")
+            f.write(f"Generated: {timestamp}\n\n")
+            for peer in peers:
+                block = [
+                    f"Peer IP: {peer['peer_ip']}",
+                    f"  State: {peer['state']}",
+                    f"  Elapsed Time: {peer['elapsed_time']}",
+                    f"  Peer Type: {peer['peer_type']}",
+                    f"  Peer Group: {peer['peer_group']}",
+                    f"  Routing-Instance: {peer['peer_rti']}",
+                    f"  Peer ASN: {peer['peer_as']}",
+                    f"  Local ASN: {peer['local_as']}",
+                    f"  Local Address: {peer['local_address']}",
+                    f"  Prefixes:",
+                    f"    Received: {peer['received_prefixes']}",
+                    f"    Accepted: {peer['accepted_prefixes']}",
+                    f"    Advertised: {peer['advertised_prefixes']}",
+                    f"    Active: {peer['active_prefixes']}",
+                    f"    Suppressed: {peer['suppressed_prefixes']}",
+                    "-" * 60,
+                ]
+                for line in block:
+                    print(line)
+                    f.write(line + "\n")
+        print(f"\n✅ Summary saved to: {summary_filename}")
     else:
         print("⚠️ No BGP peers found or failed to parse.")
 
