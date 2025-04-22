@@ -1,39 +1,24 @@
-from utils.inventory_loader import load_device_config
-from utils.discovery_and_cleanup import discover_and_cleanup
-from utils.scp_transfer import scp_image_to_device
-import os
-
+from device_handler import load_device_from_yaml, connect_to_device
+from route_collector import get_bgp_peers_summary
+from output_formatter import print_peer_summary
 
 def main():
-    print("\n==============================")
-    print("  Junos OS Upgrade Tool")
-    print("  Phase 1 & 2 Execution")
-    print("==============================")
+    # Load device info (single device for now)
+    device_info = load_device_from_yaml("inventory.yml")
 
-    # Load device details from YAML config
-    device = load_device_config("config/device.yml")
-
-    # --- Phase 1: Discovery & Storage Cleanup ---
-    success, hostname, model, version = discover_and_cleanup(device)
-
-    if not success:
-        print("[✖] Phase 1 failed. Cannot continue.")
+    # Connect via PyEZ
+    dev = connect_to_device(device_info)
+    if not dev:
+        print(f"[!] Failed to connect to {device_info['host']}")
         return
 
-    # Store facts for future use
-    device["hostname"] = hostname
-    device["model"] = model
-    device["version"] = version
+    # Gather BGP peer summary using RPC
+    peer_data = get_bgp_peers_summary(dev)
 
-    # --- Phase 2: SCP File Transfer ---
-    scp_success = scp_image_to_device(device, model)
+    # Format and display summary in terminal
+    print_peer_summary(device_info["host"], peer_data)
 
-    if not scp_success:
-        print("[✖] Phase 2 failed. Aborting.")
-        return
-
-    print("[✓] Phase 2 completed successfully.")
-
+    dev.close()
 
 if __name__ == "__main__":
     main()
