@@ -4,7 +4,7 @@ import jxmlease
 
 def get_bgp_peers_summary(dev):
     """
-    Retrieves BGP peer summary and neighbor details from two RPCs.
+    Retrieves BGP summary and neighbor-level details using two RPCs.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
@@ -24,8 +24,8 @@ def get_bgp_peers_summary(dev):
             state = peer.get("peer-state", "N/A")
             elapsed = peer.get("elapsed-time", "N/A")
 
-            # Defaults for nested <bgp-rib>
-            active = accepted = suppressed = received = "N/A"
+            # Prefix counts
+            active = accepted = suppressed = received = advertised = "N/A"
             bgp_rib = peer.get("bgp-rib")
             if bgp_rib:
                 if isinstance(bgp_rib, list):
@@ -34,8 +34,9 @@ def get_bgp_peers_summary(dev):
                 accepted = bgp_rib.get("accepted-prefix-count", "N/A")
                 suppressed = bgp_rib.get("suppressed-prefix-count", "N/A")
                 received = bgp_rib.get("received-prefix-count", "N/A")
+                advertised = bgp_rib.get("advertised-prefix-count", "N/A")
 
-            # 🔍 Additional data via get-bgp-neighbor-information
+            # Neighbor RPC for local config + routing-instance
             local_addr = local_as = peer_group = peer_rti = peer_type = "N/A"
             try:
                 neighbor_rpc = dev.rpc.get_bgp_neighbor_information(
@@ -54,21 +55,21 @@ def get_bgp_peers_summary(dev):
             except Exception as e:
                 print(f"[!] Could not retrieve neighbor details for {peer_ip}: {e}")
 
-            # Final peer summary
             peer_summary = {
                 "peer_ip": peer_ip,
                 "peer_as": peer_as,
                 "state": state,
                 "elapsed_time": elapsed,
-                "active_prefixes": active,
-                "accepted_prefixes": accepted,
-                "suppressed_prefixes": suppressed,
-                "received_prefixes": received,
-                "local_address": local_addr,
-                "local_as": local_as,
+                "peer_type": peer_type,
                 "peer_group": peer_group,
                 "peer_rti": peer_rti,
-                "peer_type": peer_type,
+                "local_as": local_as,
+                "local_address": local_addr,
+                "received_prefixes": received,
+                "accepted_prefixes": accepted,
+                "advertised_prefixes": advertised,
+                "active_prefixes": active,
+                "suppressed_prefixes": suppressed,
             }
 
             peers.append(peer_summary)
