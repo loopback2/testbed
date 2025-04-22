@@ -24,12 +24,12 @@ def main():
     if peers:
         print("\n=== BGP PEER SUMMARY ===")
         for peer in peers:
-            print(f"Peer IP: {peer['peer_ip']} | VRF: {peer['instance']} | Group: {peer['group']}")
-            print(f"  ASN: {peer['peer_as']} | Type: {peer['type']} | State: {peer['state']}")
-            print(f"  Prefixes - Active: {peer['active_prefixes']} | "
-                  f"Received: {peer['received_prefixes']} | "
-                  f"Accepted: {peer['accepted_prefixes']} | "
-                  f"Advertised: {peer['advertised_prefixes']}")
+            print(f"Peer IP: {peer['peer_ip']}")
+            print(f"  ASN: {peer['peer_as']}")
+            print(f"  State: {peer['state']}")
+            print(f"  Active Prefixes: {peer['active_prefixes']}")
+            print(f"  Accepted Prefixes: {peer['accepted_prefixes']}")
+            print(f"  Suppressed Prefixes: {peer['suppressed_prefixes']}")
             print("-" * 60)
     else:
         print("⚠️ No BGP peers found or failed to parse.")
