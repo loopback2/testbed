@@ -1,94 +1,96 @@
-from datetime import datetime
-from device_handler import load_device_from_yaml, connect_to_device
+import os
+import sys
+import time
+from getpass import getpass
+from jnpr.junos import Device
+from jnpr.junos.exception import ConnectError
+from device_handler import load_inventory
 from route_collector import get_bgp_peers_summary
 from route_dump import collect_received_routes, collect_advertised_routes
 
+
 def main():
-    print("📁 Loading YAML...")
+    # Load YAML inventory
+    print("\U0001F4C2 Loading YAML...")
+    inventory = load_inventory("inventory.yml")
+    if not inventory:
+        print("[!] Failed to load inventory file.")
+        sys.exit(1)
+
+    device_info = inventory["device"]
+    print(f"✔️  Loaded device: {device_info['host']} with username: {device_info['username']}")
+
+    # Ask for password
+    password = getpass(f"Enter password for {device_info['host']}: ")
+
+    # Connect to device
+    print(f"\U0001F50E Attempting connection to device...")
     try:
-        device = load_device_from_yaml("inventory.yml")
-        print(f"📡 Loaded device: {device['host']} with username: {device['username']}")
-    except Exception as e:
-        print(f"[!] Failed to load YAML or missing keys: {e}")
-        return
+        with Device(host=device_info["host"], user=device_info["username"], passwd=password) as dev:
+            print(f"[+] Connected to {device_info['host']}")
 
-    print("🔌 Attempting connection to device...")
-    dev = connect_to_device(device)
-    if not dev:
-        print("[!] Connection failed.")
-        return
+            # Get hostname
+            hostname = dev.facts.get("hostname", device_info["host"])
 
-    dev_hostname = dev.facts.get("hostname", device["host"])
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    summary_file = f"{dev_hostname}-BGP-Summary-{timestamp}.txt"
-    routes_file = f"{dev_hostname}-BGP-Routes-{timestamp}.txt"
+            # Collect BGP Peer Summary and Neighbor Info
+            print("\U0001F5C3️ Sending <get-bgp-summary-information/> RPC...")
+            peers = get_bgp_peers_summary(dev)
+            print(f"✔️  Parsed {len(peers)} BGP peers (summary + neighbor info).")
 
-    peers = get_bgp_peers_summary(dev)
+            # Generate timestamp
+            timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+            summary_filename = f"{hostname}-BGP-Summary-{timestamp}.txt"
+            routes_filename = f"{hostname}-BGP-Routes-{timestamp}.txt"
 
-    if peers:
-        # --- Summary Output ---
-        with open(summary_file, "w") as f:
-            f.write(f"BGP Peer Summary for {dev_hostname} ({device['host']})\n")
-            f.write(f"Generated: {timestamp}\n\n")
-            for peer in peers:
-                block = [
-                    f"Peer IP: {peer['peer_ip']}",
-                    f"  State: {peer['state']}",
-                    f"  Elapsed Time: {peer['elapsed_time']}",
-                    f"  Peer Type: {peer['peer_type']}",
-                    f"  Peer Group: {peer['peer_group']}",
-                    f"  Routing-Instance: {peer['peer_rti']}",
-                    f"  Peer ASN: {peer['peer_as']}",
-                    f"  Local ASN: {peer['local_as']}",
-                    f"  Local Address: {peer['local_address']}",
-                    f"  Route Table (RIB): {peer.get('rib_table', 'N/A')}",
-                    f"  Prefixes:",
-                    f"    Received: {peer['received_prefixes']}",
-                    f"    Accepted: {peer['accepted_prefixes']}",
-                    f"    Advertised: {peer['advertised_prefixes']}",
-                    f"    Active: {peer['active_prefixes']}",
-                    f"    Suppressed: {peer['suppressed_prefixes']}",
-                    "-" * 60,
-                ]
-                for line in block:
-                    print(line)
-                    f.write(line + "\n")
-        print(f"\n✅ Summary saved to: {summary_file}")
+            # Write BGP summary to file
+            with open(summary_filename, "w") as f:
+                f.write(f"BGP Summary Report for {hostname}\n")
+                f.write(f"Generated: {timestamp}\n")
+                f.write("=" * 60 + "\n")
+                for peer in peers:
+                    f.write(f"Peer IP: {peer['peer_address']}\n")
+                    f.write(f"State: {peer['peer_state']}\n")
+                    f.write(f"Elapsed Time: {peer['elapsed_time']}\n")
+                    f.write(f"Peer Type: {peer['peer_type']}\n")
+                    f.write(f"Peer Group: {peer['peer_group']}\n")
+                    f.write(f"Routing-Instance: {peer['routing_instance']}\n")
+                    f.write(f"Peer ASN: {peer['peer_as']}\n")
+                    f.write(f"Local ASN: {peer['local_as']}\n")
+                    f.write(f"Local Address: {peer['local_address']}\n")
+                    f.write(f"Route Table (RIB): {peer.get('rib_table', 'N/A')}\n")
+                    f.write("Prefixes:\n")
+                    f.write(f"  Received: {peer['received_prefix_count']}\n")
+                    f.write(f"  Accepted: {peer['accepted_prefix_count']}\n")
+                    f.write(f"  Advertised: {peer['advertised_prefix_count']}\n")
+                    f.write(f"  Active: {peer['active_prefix_count']}\n")
+                    f.write(f"  Suppressed: {peer['suppressed_prefix_count']}\n")
+                    f.write("-" * 60 + "\n")
+            print(f"\u2705 Summary saved to: {summary_filename}")
 
-        # --- Routes Output ---
-        with open(routes_file, "w") as f:
-            f.write(f"BGP Route Collection for {dev_hostname}\nGenerated: {timestamp}\n\n")
-            for peer in peers:
-                peer_ip = peer["peer_ip"]
-                rib = peer["rib_table"]
-                f.write(f"== Peer: {peer_ip} | Table: {rib or 'N/A'} ==\n")
+            # Write Received and Advertised Routes
+            with open(routes_filename, "w") as f:
+                f.write(f"BGP Route Collection for {hostname}\n")
+                f.write(f"Generated: {timestamp}\n")
+                f.write("=" * 60 + "\n")
+                for peer in peers:
+                    f.write(f"== Peer: {peer['peer_address']} | Table: {peer.get('rib_table', 'N/A')} ==\n")
 
-                # Advertised
-                f.write("\n--- ADVERTISED ROUTES ---\n")
-                if not rib or rib == "N/A":
-                    f.write("No rib defined, skipping advertised.\n")
-                else:
-                    adv = collect_advertised_routes(dev, peer_ip, rib)
-                    for route in adv:
-                        f.write(route + "\n")
+                    # Collect advertised routes first (optional)
+                    f.write("\n--- ADVERTISED ROUTES ---\n")
+                    collect_advertised_routes(dev, peer, f)
 
-                # Received
-                f.write("\n--- RECEIVED ROUTES ---\n")
-                if not rib or rib == "N/A":
-                    f.write("No rib defined, skipping received.\n")
-                else:
-                    recv = collect_received_routes(dev, peer_ip, rib)
-                    for route in recv:
-                        f.write(route + "\n")
+                    # Collect received routes
+                    f.write("\n--- RECEIVED ROUTES ---\n")
+                    collect_received_routes(dev, peer, f)
 
-                f.write("=" * 60 + "\n\n")
+                    f.write("\n" + "=" * 60 + "\n")
 
-        print(f"\n✅ Route data saved to: {routes_file}")
-    else:
-        print("⚠️ No BGP peers found or failed to parse.")
+            print(f"\u2705 All route data saved to: {routes_filename}")
 
-    dev.close()
-    print("🔒 Connection closed.")
+    except ConnectError as e:
+        print(f"[!] Connection failed: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
