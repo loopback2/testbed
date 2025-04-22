@@ -1,5 +1,6 @@
 from device_handler import load_device_from_yaml, connect_to_device
 from route_collector import get_bgp_peers_summary
+from route_dump import collect_routes
 from datetime import datetime
 
 def main():
@@ -55,6 +56,10 @@ def main():
                     print(line)
                     f.write(line + "\n")
         print(f"\n✅ Summary saved to: {summary_filename}")
+
+        # 🔄 Collect all routes (received + advertised) and write to route file
+        collect_routes(dev, peers, dev_hostname, timestamp)
+
     else:
         print("⚠️ No BGP peers found or failed to parse.")
 
