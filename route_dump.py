@@ -5,7 +5,7 @@ import jxmlease
 
 def extract_destinations_from_rib(xml_data, expected_table):
     """
-    Extracts only <rt-destination> values from the matching route table.
+    Parses XML and extracts route destinations with next hops from the matching rib table.
     """
     try:
         parsed = jxmlease.parse(xml_data)
@@ -22,9 +22,19 @@ def extract_destinations_from_rib(xml_data, expected_table):
                     routes = [routes]
 
                 for route in routes:
-                    dest = route.get("rt-destination")
-                    if dest:
-                        matched_routes.append(dest)
+                    dest = route.get("rt-destination", "N/A")
+                    nh_to = "N/A"
+                    try:
+                        rt_entry = route.get("rt-entry", {})
+                        nh_data = rt_entry.get("nh", {})
+                        if isinstance(nh_data, list):
+                            nh_to = nh_data[0].get("to", "N/A")
+                        else:
+                            nh_to = nh_data.get("to", "N/A")
+                    except Exception:
+                        pass
+
+                    matched_routes.append(f"- {dest}, Next hop: {nh_to}")
 
         return matched_routes or ["[!] No routes found in matching rib."]
     except Exception as e:
@@ -64,7 +74,7 @@ def collect_routes(dev, peers, hostname, timestamp):
                 routes = extract_destinations_from_rib(rpc_xml, rib)
 
                 for route in routes:
-                    f.write(f"- {route}\n")
+                    f.write(f"{route}\n")
                 print(f"📥 Received routes collected for {peer_ip}")
 
             except RpcError as e:
