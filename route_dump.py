@@ -1,7 +1,6 @@
 from jnpr.junos.exception import RpcError
 from lxml import etree
 import jxmlease
-from datetime import datetime
 
 
 def collect_received_routes(dev, peer_ip, rib):
