@@ -4,14 +4,18 @@ from jnpr.junos.exception import RpcError
 def get_bgp_peers_summary(dev):
     """
     Get BGP summary info from the device using RPC and return a list of peer dictionaries.
-    Debug prints added for troubleshooting.
+    Includes debug output to inspect raw RPC response and troubleshoot malformed XML.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
         response = dev.rpc.get_bgp_summary_information()
-        xml_str = str(response)
 
-        # Optional: save raw XML for inspection
+        # Convert to string and preview the response
+        xml_str = str(response)
+        print("\n🧪 RAW RPC RESPONSE (first 500 chars):")
+        print(xml_str[:500])
+
+        # Save raw XML to file for deeper inspection
         with open("raw_bgp_summary.xml", "w") as f:
             f.write(xml_str)
 
@@ -19,7 +23,7 @@ def get_bgp_peers_summary(dev):
         parser = jxmlease.Parser()
         data = parser(xml_str)
 
-        # 🧪 Debug print: show top-level keys
+        # Print top-level keys to verify structure
         print(f"🧪 Top-level keys: {list(data.keys())}")
 
         bgp_info = data.get("bgp-information")
@@ -38,7 +42,6 @@ def get_bgp_peers_summary(dev):
             print("⚠️ 'bgp-peer' block not found.")
             return []
 
-        # If it's a single dict, wrap in list
         if not isinstance(peers_raw, list):
             peers_raw = [peers_raw]
 
@@ -65,5 +68,5 @@ def get_bgp_peers_summary(dev):
         print(f"[!] RPC Error: {e}")
         return []
     except Exception as e:
-        print(f"[!] General error while retrieving BGP peer summary: {e}")
+        print(f"[!] Failed to parse XML: {e}")
         return []
