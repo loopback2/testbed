@@ -18,7 +18,7 @@ def main():
         print("[!] Connection failed.")
         return
 
-    print("📊 Gathering BGP peer summary...")
+    print("📊 Gathering BGP peer summary and neighbor info...")
     peers = get_bgp_peers_summary(dev)
 
     if peers:
@@ -28,6 +28,11 @@ def main():
             print(f"  ASN: {peer['peer_as']}")
             print(f"  State: {peer['state']}")
             print(f"  Elapsed Time: {peer['elapsed_time']}")
+            print(f"  Local Address: {peer['local_address']}")
+            print(f"  Local AS: {peer['local_as']}")
+            print(f"  Peer Group: {peer['peer_group']}")
+            print(f"  Routing-Instance: {peer['peer_rti']}")
+            print(f"  Peer Type: {peer['peer_type']}")
             print(f"  Active Prefixes: {peer['active_prefixes']}")
             print(f"  Accepted Prefixes: {peer['accepted_prefixes']}")
             print(f"  Suppressed Prefixes: {peer['suppressed_prefixes']}")
