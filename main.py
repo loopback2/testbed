@@ -42,6 +42,7 @@ def main():
                     f"  Peer ASN: {peer['peer_as']}",
                     f"  Local ASN: {peer['local_as']}",
                     f"  Local Address: {peer['local_address']}",
+                    f"  Route Table (RIB): {peer['rib_table']}",
                     f"  Prefixes:",
                     f"    Received: {peer['received_prefixes']}",
                     f"    Accepted: {peer['accepted_prefixes']}",

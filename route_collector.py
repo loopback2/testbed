@@ -4,7 +4,7 @@ import jxmlease
 
 def get_bgp_peers_summary(dev):
     """
-    Retrieves BGP summary and neighbor-level details using two RPCs.
+    Retrieves full BGP summary, neighbor info, and route table (RIB) name per peer.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
@@ -24,8 +24,8 @@ def get_bgp_peers_summary(dev):
             state = peer.get("peer-state", "N/A")
             elapsed = peer.get("elapsed-time", "N/A")
 
-            # Prefix counts
-            active = accepted = suppressed = received = advertised = "N/A"
+            # Prefix counts + RIB table name
+            active = accepted = suppressed = received = advertised = rib_table = "N/A"
             bgp_rib = peer.get("bgp-rib")
             if bgp_rib:
                 if isinstance(bgp_rib, list):
@@ -35,8 +35,9 @@ def get_bgp_peers_summary(dev):
                 suppressed = bgp_rib.get("suppressed-prefix-count", "N/A")
                 received = bgp_rib.get("received-prefix-count", "N/A")
                 advertised = bgp_rib.get("advertised-prefix-count", "N/A")
+                rib_table = bgp_rib.get("name", "N/A")
 
-            # Neighbor RPC for local config + routing-instance
+            # Neighbor RPC
             local_addr = local_as = peer_group = peer_rti = peer_type = "N/A"
             try:
                 neighbor_rpc = dev.rpc.get_bgp_neighbor_information(
@@ -65,6 +66,7 @@ def get_bgp_peers_summary(dev):
                 "peer_rti": peer_rti,
                 "local_as": local_as,
                 "local_address": local_addr,
+                "rib_table": rib_table,
                 "received_prefixes": received,
                 "accepted_prefixes": accepted,
                 "advertised_prefixes": advertised,
@@ -74,7 +76,7 @@ def get_bgp_peers_summary(dev):
 
             peers.append(peer_summary)
 
-        print(f"✅ Parsed {len(peers)} BGP peers (summary + neighbor info).")
+        print(f"✅ Parsed {len(peers)} BGP peers (summary + neighbor info + RIB).")
         return peers
 
     except RpcError as e:
