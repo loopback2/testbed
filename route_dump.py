@@ -1,13 +1,12 @@
 from jnpr.junos.exception import RpcError
 from lxml import etree
-from jnpr.junos.utils.config import Config
-from jnpr.junos.factory import loadyaml
-from lxml.builder import E
 import jxmlease
+from lxml.builder import E
+
 
 def extract_route_destinations(xml_data):
     """
-    Parses raw XML and returns a list of all rt-destination entries
+    Parses XML and returns a list of all <rt-destination> entries.
     """
     try:
         parsed = jxmlease.parse(xml_data)
@@ -22,11 +21,12 @@ def extract_route_destinations(xml_data):
                 destinations.append(dest)
         return destinations
     except Exception as e:
-        return [f"[!] Failed to parse route XML: {e}"]
+        return [f"[!] Failed to parse XML: {e}"]
+
 
 def collect_routes(dev, peers, hostname, timestamp):
     """
-    Collects and saves advertised and received BGP routes for each peer.
+    Collects advertised and received BGP routes for each peer and writes them to a file.
     """
     route_filename = f"{hostname}-BGP-Routes-{timestamp}.txt"
 
@@ -39,22 +39,26 @@ def collect_routes(dev, peers, hostname, timestamp):
 
             f.write(f"== Peer: {peer_ip} | Table: {rib} ==\n")
 
-            # -------------------
+            # ----------------------
             # ADVERTISED ROUTES
-            # -------------------
+            # ----------------------
             f.write("\n--- ADVERTISED ROUTES ---\n")
             try:
                 advertised_rpc = E.get_route_information(
-                    E.peer(peer_ip),
                     E.table(rib),
-                    E.advertised()
+                    E("advertising-protocol-name", "bgp"),
+                    E.neighbor(peer_ip)
                 )
                 adv_response = dev.rpc(advertised_rpc)
                 adv_xml = etree.tostring(adv_response, pretty_print=True, encoding="unicode")
                 adv_routes = extract_route_destinations(adv_xml)
 
-                for route in adv_routes:
-                    f.write(f"- {route}\n")
+                if adv_routes:
+                    for route in adv_routes:
+                        f.write(f"- {route}\n")
+                else:
+                    f.write("No advertised routes found.\n")
+
                 print(f"📤 Advertised routes collected for {peer_ip}")
 
             except RpcError as e:
@@ -62,9 +66,9 @@ def collect_routes(dev, peers, hostname, timestamp):
                 print(msg)
                 f.write(msg + "\n")
 
-            # -------------------
+            # ----------------------
             # RECEIVED ROUTES
-            # -------------------
+            # ----------------------
             f.write("\n--- RECEIVED ROUTES ---\n")
             try:
                 recv_rpc = dev.rpc.get_route_information(
@@ -75,8 +79,12 @@ def collect_routes(dev, peers, hostname, timestamp):
                 recv_xml = etree.tostring(recv_rpc, pretty_print=True, encoding="unicode")
                 recv_routes = extract_route_destinations(recv_xml)
 
-                for route in recv_routes:
-                    f.write(f"- {route}\n")
+                if recv_routes:
+                    for route in recv_routes:
+                        f.write(f"- {route}\n")
+                else:
+                    f.write("No received routes found.\n")
+
                 print(f"📥 Received routes collected for {peer_ip}")
 
             except RpcError as e:
