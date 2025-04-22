@@ -4,43 +4,46 @@ import jxmlease
 
 def get_bgp_peers_summary(dev):
     """
-    Retrieves basic BGP summary info from a Junos device using RPC.
-    Properly extracts nested prefix data from inside <bgp-rib>.
+    Retrieves BGP peer summary data including prefix counts and elapsed time.
     """
     try:
         print("📡 Sending <get-bgp-summary-information/> RPC...")
         rpc = dev.rpc.get_bgp_summary_information()
         rpc_xml = etree.tostring(rpc, pretty_print=True, encoding="unicode")
 
-        # Parse using jxmlease
         result = jxmlease.parse(rpc_xml)
         bgp_peers = result.get("bgp-information", {}).get("bgp-peer", [])
 
-        # Ensure it's always a list
         if not isinstance(bgp_peers, list):
             bgp_peers = [bgp_peers]
 
         peers = []
         for peer in bgp_peers:
-            # Default values
-            active = accepted = suppressed = "N/A"
+            # Defaults
+            active = accepted = suppressed = received = elapsed = "N/A"
 
-            # Check if bgp-rib exists and extract prefix counts
+            # Prefix stats
             bgp_rib = peer.get("bgp-rib")
             if bgp_rib:
-                if isinstance(bgp_rib, list):  # handle multiple ribs, just take first
+                if isinstance(bgp_rib, list):
                     bgp_rib = bgp_rib[0]
                 active = bgp_rib.get("active-prefix-count", "N/A")
                 accepted = bgp_rib.get("accepted-prefix-count", "N/A")
                 suppressed = bgp_rib.get("suppressed-prefix-count", "N/A")
+                received = bgp_rib.get("received-prefix-count", "N/A")
+
+            # Elapsed time
+            elapsed = peer.get("elapsed-time", "N/A")
 
             peer_summary = {
                 "peer_ip": peer.get("peer-address", "N/A"),
                 "peer_as": peer.get("peer-as", "N/A"),
                 "state": peer.get("peer-state", "N/A"),
+                "elapsed_time": elapsed,
                 "active_prefixes": active,
                 "accepted_prefixes": accepted,
                 "suppressed_prefixes": suppressed,
+                "received_prefixes": received,
             }
 
             peers.append(peer_summary)

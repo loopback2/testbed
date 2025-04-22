@@ -27,9 +27,11 @@ def main():
             print(f"Peer IP: {peer['peer_ip']}")
             print(f"  ASN: {peer['peer_as']}")
             print(f"  State: {peer['state']}")
+            print(f"  Elapsed Time: {peer['elapsed_time']}")
             print(f"  Active Prefixes: {peer['active_prefixes']}")
             print(f"  Accepted Prefixes: {peer['accepted_prefixes']}")
             print(f"  Suppressed Prefixes: {peer['suppressed_prefixes']}")
+            print(f"  Received Prefixes: {peer['received_prefixes']}")
             print("-" * 60)
     else:
         print("⚠️ No BGP peers found or failed to parse.")
