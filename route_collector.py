@@ -1,15 +1,20 @@
 import jxmlease
 from jnpr.junos.exception import RpcError
 
-def get_bgp_peers_summary(dev, logger):
+def get_bgp_peers_summary(dev):
+    """
+    Get BGP summary info from the device using RPC and return a list of peer dictionaries.
+    """
     try:
+        print("📡 Sending <get-bgp-summary-information/> RPC...")
         response = dev.rpc.get_bgp_summary_information()
         xml_str = str(response)
 
-        if "<rpc-reply" not in xml_str:
-            logger.error("❌ RPC response is not valid XML.")
-            return []
+        # Optional: save raw XML for troubleshooting
+        with open("raw_bgp_summary.xml", "w") as f:
+            f.write(xml_str)
 
+        print("📄 Parsing XML with jxmlease...")
         parser = jxmlease.Parser()
         data = parser(xml_str)
 
@@ -33,11 +38,12 @@ def get_bgp_peers_summary(dev, logger):
             }
             peers.append(peer_dict)
 
+        print(f"✅ Parsed {len(peers)} BGP peers.")
         return peers
 
     except RpcError as e:
-        logger.error(f"❌ RPC Error: {e}")
+        print(f"[!] RPC Error: {e}")
         return []
     except Exception as e:
-        logger.exception(f"❌ Unexpected error during BGP peer parsing: {e}")
+        print(f"[!] General error while retrieving BGP peer summary: {e}")
         return []
