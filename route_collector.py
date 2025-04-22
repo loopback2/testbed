@@ -1,87 +1,65 @@
-from jnpr.junos.exception import RpcError
 from lxml import etree
 import jxmlease
 
+
 def get_bgp_peers_summary(dev):
     """
-    Retrieves full BGP summary, neighbor info, and route table (RIB) name per peer.
+    Fetches BGP summary and neighbor information using RPCs.
+    Returns a list of dictionaries, one per BGP peer.
     """
+    peers = []
+
     try:
-        print("📡 Sending <get-bgp-summary-information/> RPC...")
-        rpc = dev.rpc.get_bgp_summary_information()
-        rpc_xml = etree.tostring(rpc, pretty_print=True, encoding="unicode")
-        result = jxmlease.parse(rpc_xml)
+        # Step 1: Get BGP summary (peer IP, ASN, state, etc.)
+        summary_rpc = dev.rpc.get_bgp_summary_information()
+        summary_xml = etree.tostring(summary_rpc, pretty_print=True, encoding="unicode")
+        summary_data = jxmlease.parse(summary_xml)
 
-        bgp_peers = result.get("bgp-information", {}).get("bgp-peer", [])
-        if not isinstance(bgp_peers, list):
-            bgp_peers = [bgp_peers]
+        bgp_info = summary_data.get("bgp-information", {})
+        peer_entries = bgp_info.get("bgp-peer", [])
 
-        peers = []
+        if not isinstance(peer_entries, list):
+            peer_entries = [peer_entries]
 
-        for peer in bgp_peers:
+        for peer in peer_entries:
             peer_ip = peer.get("peer-address", "N/A")
-            peer_as = peer.get("peer-as", "N/A")
-            state = peer.get("peer-state", "N/A")
-            elapsed = peer.get("elapsed-time", "N/A")
 
-            # Prefix counts + RIB table name
-            active = accepted = suppressed = received = advertised = rib_table = "N/A"
-            bgp_rib = peer.get("bgp-rib")
-            if bgp_rib:
-                if isinstance(bgp_rib, list):
-                    bgp_rib = bgp_rib[0]
-                active = bgp_rib.get("active-prefix-count", "N/A")
-                accepted = bgp_rib.get("accepted-prefix-count", "N/A")
-                suppressed = bgp_rib.get("suppressed-prefix-count", "N/A")
-                received = bgp_rib.get("received-prefix-count", "N/A")
-                advertised = bgp_rib.get("advertised-prefix-count", "N/A")
-                rib_table = bgp_rib.get("name", "N/A")
+            # Step 2: Get neighbor-specific info (for rib and next-hop data)
+            neighbor_rpc = dev.rpc.get_bgp_neighbor_information(neighbor_address=peer_ip)
+            neighbor_xml = etree.tostring(neighbor_rpc, pretty_print=True, encoding="unicode")
+            neighbor_data = jxmlease.parse(neighbor_xml)
 
-            # Neighbor RPC
-            local_addr = local_as = peer_group = peer_rti = peer_type = "N/A"
-            try:
-                neighbor_rpc = dev.rpc.get_bgp_neighbor_information(
-                    neighbor_address=peer_ip
-                )
-                neighbor_xml = etree.tostring(neighbor_rpc, pretty_print=True, encoding="unicode")
-                neighbor_data = jxmlease.parse(neighbor_xml)
+            # Extract deeper fields with safe fallback
+            bgp_peer_info = neighbor_data.get("bgp-information", {}).get("bgp-peer", {})
+            rib_table = "N/A"
+            if isinstance(bgp_peer_info, dict):
+                rib = bgp_peer_info.get("bgp-rib", {})
+                if isinstance(rib, dict):
+                    rib_table = rib.get("name", "N/A")
 
-                peer_data = neighbor_data.get("bgp-information", {}).get("bgp-peer", {})
-                local_addr = peer_data.get("local-address", "N/A")
-                local_as = peer_data.get("local-as", "N/A")
-                peer_group = peer_data.get("peer-group", "N/A")
-                peer_rti = peer_data.get("peer-cfg-rti", "N/A")
-                peer_type = peer_data.get("peer-type", "N/A")
-
-            except Exception as e:
-                print(f"[!] Could not retrieve neighbor details for {peer_ip}: {e}")
-
-            peer_summary = {
+            peer_info = {
                 "peer_ip": peer_ip,
-                "peer_as": peer_as,
-                "state": state,
-                "elapsed_time": elapsed,
-                "peer_type": peer_type,
-                "peer_group": peer_group,
-                "peer_rti": peer_rti,
-                "local_as": local_as,
-                "local_address": local_addr,
+                "peer_as": peer.get("peer-as", "N/A"),
+                "state": peer.get("peer-state", "N/A"),
+                "elapsed_time": peer.get("elapsed-time", "N/A"),
+                "accepted_prefixes": peer.get("accepted-prefix-count", "N/A"),
+                "received_prefixes": peer.get("received-prefix-count", "N/A"),
+                "active_prefixes": peer.get("active-prefix-count", "N/A"),
+                "suppressed_prefixes": peer.get("suppressed-prefix-count", "N/A"),
+                "advertised_prefixes": peer.get("advertised-prefix-count", "N/A"),
                 "rib_table": rib_table,
-                "received_prefixes": received,
-                "accepted_prefixes": accepted,
-                "advertised_prefixes": advertised,
-                "active_prefixes": active,
-                "suppressed_prefixes": suppressed,
+                "local_address": bgp_peer_info.get("local-address", "N/A"),
+                "local_as": bgp_peer_info.get("local-as", "N/A"),
+                "peer_group": bgp_peer_info.get("peer-group", "N/A"),
+                "peer_rti": bgp_peer_info.get("peer-cfg-rti", "N/A"),
+                "peer_type": bgp_peer_info.get("peer-type", "N/A"),
             }
 
-            peers.append(peer_summary)
+            peers.append(peer_info)
 
-        print(f"✅ Parsed {len(peers)} BGP peers (summary + neighbor info + RIB).")
+        print(f"✅ Parsed {len(peers)} BGP peers (summary + neighbor info).")
         return peers
 
-    except RpcError as e:
-        print(f"[!] RPC Error: {e}")
-        return []
     except Exception as e:
-        print(f"[!] Error while retrieving BGP summary: {e}")
+        print(f"[!] Error gathering BGP peer summary: {e}")
         return []
