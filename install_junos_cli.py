@@ -18,12 +18,12 @@ def get_success_strings(model):
         return [
             "Install completed",
             "Host OS upgrade staged",
-            "Reboot the system to complete installation"
+            "Reboot the system to complete installation",
         ]
     elif "QFX5120" in model:
-        return ["activated at next reboot", "Install completed"]
+        return ["Install completed", "activated at next reboot"]
     elif "EX4300" in model or "EX4400" in model:
-        return ["activated at next reboot", "Install completed"]
+        return ["Install completed", "activated at next reboot"]
     return ["Install completed"]
 
 def install_junos_cli(device, image_filename):
@@ -48,16 +48,14 @@ def install_junos_cli(device, image_filename):
         output = connection.send_command(
             command,
             expect_string=r"#|%|>",
-            delay_factor=5,
-            max_loops=3000,
-            read_timeout_override=900,  # ✅ Only this is supported
+            delay_factor=8,  # ← Makes Netmiko wait longer between reads
+            max_loops=1000,  # ← Max number of output read cycles
         )
 
         connection.disconnect()
 
         log_output(device["name"], "phase3-install", output)
 
-        # Search for any known success string
         success_strings = get_success_strings(model)
         for keyword in success_strings:
             if keyword.lower() in output.lower():
