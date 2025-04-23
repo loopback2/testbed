@@ -5,9 +5,6 @@ from datetime import datetime
 
 
 def log_output(device_name, phase, content):
-    """
-    Saves CLI output to a timestamped log file.
-    """
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_name = device_name.replace(" ", "_")
     log_path = f"logs/{safe_name}-{phase}-{timestamp}.log"
@@ -17,7 +14,6 @@ def log_output(device_name, phase, content):
     print(f"[💾] Log saved to: {log_path}")
 
 
-# Success strings by model
 SUCCESS_STRINGS = {
     "QFX5120-YM": [
         "Host OS upgrade staged",
@@ -44,9 +40,6 @@ def get_success_strings(model):
 
 
 def install_junos_cli(device, image_filename):
-    """
-    Uses Paramiko to run Junos OS install command with real-time output.
-    """
     print("\n--- Phase 3: Junos OS Install ---")
     try:
         ip = device["ip"]
@@ -61,19 +54,18 @@ def install_junos_cli(device, image_filename):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(ip, username=username, password=password, look_for_keys=False)
 
-        print(f"[→] Sending install command: {command}\n")
-
         shell = ssh.invoke_shell()
         shell.send(command + "\n")
         time.sleep(2)
 
         success_strings = get_success_strings(model)
-        output_log = ""
-        timeout = 900  # 15 mins
-        start_time = time.time()
-        found_success = False
+        full_output = ""
         spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         spin_index = 0
+        timeout = 900
+        start_time = time.time()
+
+        found_success = False
 
         while True:
             if time.time() - start_time > timeout:
@@ -81,15 +73,15 @@ def install_junos_cli(device, image_filename):
                 break
 
             if shell.recv_ready():
-                output = shell.recv(65535).decode("utf-8", errors="ignore")
-                print(output, end="")
-                output_log += output
+                chunk = shell.recv(65535).decode("utf-8", errors="ignore")
+                print(chunk, end="")
+                full_output += chunk
 
                 for keyword in success_strings:
-                    if keyword.lower() in output.lower():
+                    if keyword.lower() in full_output.lower():
                         found_success = True
 
-            if found_success:
+            if found_success and full_output.strip().endswith(">"):
                 break
 
             print(f"\r[⏳] Waiting... {spinner[spin_index % len(spinner)]}", end="", flush=True)
@@ -97,7 +89,7 @@ def install_junos_cli(device, image_filename):
             time.sleep(1)
 
         ssh.close()
-        log_output(device["name"], "phase3-install", output_log)
+        log_output(device["name"], "phase3-install", full_output)
 
         if found_success:
             print("\n[✅] Junos OS upgrade appears successful and pending reboot.")
