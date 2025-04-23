@@ -45,11 +45,10 @@ def install_junos_cli(device, image_filename):
         )
 
         print(f"[📦] Sending install command: {command}\n")
-        output = connection.send_command(
+        output = connection.send_command_timing(
             command,
-            expect_string=r"#|%|>",
-            delay_factor=8,  # ← Makes Netmiko wait longer between reads
-            max_loops=1000,  # ← Max number of output read cycles
+            delay_factor=8,
+            max_loops=1000,
         )
 
         connection.disconnect()
