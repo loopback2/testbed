@@ -17,7 +17,7 @@ def log_output(device_name, phase, content):
     print(f"[💾] Log saved to: {log_path}")
 
 
-# Model keywords to expected success strings
+# Model to success string mapping
 SUCCESS_STRINGS = {
     "QFX5120-YM": [
         "Host OS upgrade staged",
@@ -32,7 +32,7 @@ SUCCESS_STRINGS = {
 
 def get_success_strings(model):
     """
-    Match partial model to success strings list.
+    Match partial model to expected success messages.
     """
     model = model.upper()
     if "QFX5120" in model and "YM" in model:
@@ -43,13 +43,13 @@ def get_success_strings(model):
         return SUCCESS_STRINGS["EX4300"]
     elif "EX4400" in model:
         return SUCCESS_STRINGS["EX4400"]
-    else:
-        return ["activated at next reboot"]  # Fallback
+    return ["activated at next reboot"]
 
 
 def install_junos_cli(device, image_filename):
     """
-    Installs Junos using Netmiko, captures real-time output, and exits when known success string is seen.
+    Runs 'request system software add' with real-time output capture.
+    Ends cleanly as soon as install completes and matches success string.
     """
     print("\n--- Phase 3: Junos OS Install ---")
 
@@ -69,12 +69,12 @@ def install_junos_cli(device, image_filename):
         time.sleep(1)
 
         output_log = ""
-        timeout = 900  # 15 minutes
+        timeout = 900  # 15 minutes max
         start_time = time.time()
 
         success_strings = get_success_strings(device["model"])
         found_success = False
-        seen_output = False
+        buffer = ""
 
         while True:
             if time.time() - start_time > timeout:
@@ -83,27 +83,23 @@ def install_junos_cli(device, image_filename):
 
             out = connection.read_channel()
             if out:
-                out_stripped = out.strip()
-                if out_stripped:
-                    print(out, end="")
-                    seen_output = True
+                print(out, end="")
                 output_log += out
+                buffer += out
 
                 for keyword in success_strings:
-                    if keyword.lower() in out.lower():
+                    if keyword.lower() in buffer.lower():
                         found_success = True
                         break
 
                 if found_success:
+                    time.sleep(3)  # wait briefly to collect final CLI output
+                    output_log += connection.read_channel()
                     break
-            else:
-                if not seen_output:
-                    print(".", end="", flush=True)
-                time.sleep(1)
 
-        output_log += connection.read_channel()
+            time.sleep(1)
+
         connection.disconnect()
-
         log_output(device["name"], "phase3-install", output_log)
 
         if found_success:
