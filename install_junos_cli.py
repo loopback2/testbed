@@ -1,8 +1,7 @@
-import paramiko
-import time
-import os
 from datetime import datetime
-
+import os
+from netmiko import ConnectHandler
+import time
 
 def log_output(device_name, phase, content):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -13,31 +12,19 @@ def log_output(device_name, phase, content):
         f.write(content)
     print(f"[💾] Log saved to: {log_path}")
 
-
-SUCCESS_STRINGS = {
-    "QFX5120-YM": [
-        "Host OS upgrade staged",
-        "Reboot the system to complete installation",
-        "Install completed"
-    ],
-    "QFX5120-Y": ["activated at next reboot"],
-    "EX4300": ["activated at next reboot"],
-    "EX4400": ["activated at next reboot"],
-}
-
-
 def get_success_strings(model):
     model = model.upper()
     if "QFX5120" in model and "YM" in model:
-        return SUCCESS_STRINGS["QFX5120-YM"]
+        return [
+            "Install completed",
+            "Host OS upgrade staged",
+            "Reboot the system to complete installation"
+        ]
     elif "QFX5120" in model:
-        return SUCCESS_STRINGS["QFX5120-Y"]
-    elif "EX4300" in model:
-        return SUCCESS_STRINGS["EX4300"]
-    elif "EX4400" in model:
-        return SUCCESS_STRINGS["EX4400"]
-    return ["activated at next reboot"]
-
+        return ["activated at next reboot", "Install completed"]
+    elif "EX4300" in model or "EX4400" in model:
+        return ["activated at next reboot", "Install completed"]
+    return ["Install completed"]
 
 def install_junos_cli(device, image_filename):
     print("\n--- Phase 3: Junos OS Install ---")
@@ -49,54 +36,37 @@ def install_junos_cli(device, image_filename):
         image_path = f"/var/tmp/{image_filename}"
         command = f"request system software add {image_path} no-copy"
 
-        print(f"[→] Connecting via SSH to {ip}")
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(ip, username=username, password=password, look_for_keys=False)
+        print(f"[→] Connecting via Netmiko to {ip}...")
+        connection = ConnectHandler(
+            device_type="juniper",
+            host=ip,
+            username=username,
+            password=password,
+        )
 
-        shell = ssh.invoke_shell()
-        shell.send(command + "\n")
-        time.sleep(2)
+        print(f"[📦] Sending install command: {command}\n")
+        output = connection.send_command(
+            command,
+            expect_string=r"#|%|>",   # Accept a variety of prompt styles
+            delay_factor=5,
+            max_loops=3000,
+            timeout=900,
+            read_timeout_override=900,
+        )
 
+        connection.disconnect()
+
+        log_output(device["name"], "phase3-install", output)
+
+        # Search for any known success string
         success_strings = get_success_strings(model)
-        full_output = ""
-        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        spin_index = 0
-        timeout = 900
-        start_time = time.time()
+        for keyword in success_strings:
+            if keyword.lower() in output.lower():
+                print(f"\n[✅] Junos OS install appears successful. Awaiting reboot.")
+                return True
 
-        found_success = False
-
-        while True:
-            if time.time() - start_time > timeout:
-                print("\n[✖] Timeout waiting for install to complete.")
-                break
-
-            if shell.recv_ready():
-                chunk = shell.recv(65535).decode("utf-8", errors="ignore")
-                print(chunk, end="")
-                full_output += chunk
-
-                for keyword in success_strings:
-                    if keyword.lower() in full_output.lower():
-                        found_success = True
-
-            if found_success and full_output.strip().endswith(">"):
-                break
-
-            print(f"\r[⏳] Waiting... {spinner[spin_index % len(spinner)]}", end="", flush=True)
-            spin_index += 1
-            time.sleep(1)
-
-        ssh.close()
-        log_output(device["name"], "phase3-install", full_output)
-
-        if found_success:
-            print("\n[✅] Junos OS upgrade appears successful and pending reboot.")
-            return True
-        else:
-            print("\n[✖] Could not confirm success string. Manual review recommended.")
-            return False
+        print(f"\n[✖] Junos OS install output did not match known success markers. Review log.")
+        return False
 
     except Exception as e:
         print(f"[✖] Installation failed: {e}")
