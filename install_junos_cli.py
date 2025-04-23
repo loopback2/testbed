@@ -47,11 +47,10 @@ def install_junos_cli(device, image_filename):
         print(f"[📦] Sending install command: {command}\n")
         output = connection.send_command(
             command,
-            expect_string=r"#|%|>",   # Accept a variety of prompt styles
+            expect_string=r"#|%|>",
             delay_factor=5,
             max_loops=3000,
-            timeout=900,
-            read_timeout_override=900,
+            read_timeout_override=900,  # ✅ Only this is supported
         )
 
         connection.disconnect()
