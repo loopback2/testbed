@@ -1,7 +1,7 @@
-from netmiko import ConnectHandler
+import paramiko
 import time
-from datetime import datetime
 import os
+from datetime import datetime
 
 
 def log_output(device_name, phase, content):
@@ -17,7 +17,7 @@ def log_output(device_name, phase, content):
     print(f"[💾] Log saved to: {log_path}")
 
 
-# Model to success string mapping
+# Success strings by model
 SUCCESS_STRINGS = {
     "QFX5120-YM": [
         "Host OS upgrade staged",
@@ -31,9 +31,6 @@ SUCCESS_STRINGS = {
 
 
 def get_success_strings(model):
-    """
-    Match partial model to expected success messages.
-    """
     model = model.upper()
     if "QFX5120" in model and "YM" in model:
         return SUCCESS_STRINGS["QFX5120-YM"]
@@ -48,58 +45,58 @@ def get_success_strings(model):
 
 def install_junos_cli(device, image_filename):
     """
-    Runs 'request system software add' with real-time output capture.
-    Ends cleanly as soon as install completes and matches success string.
+    Uses Paramiko to run Junos OS install command with real-time output.
     """
     print("\n--- Phase 3: Junos OS Install ---")
-
     try:
-        connection = ConnectHandler(
-            device_type="juniper",
-            host=device["ip"],
-            username=device["username"],
-            password=device["password"]
-        )
-
+        ip = device["ip"]
+        username = device["username"]
+        password = device["password"]
+        model = device["model"]
         image_path = f"/var/tmp/{image_filename}"
         command = f"request system software add {image_path} no-copy"
 
-        print(f"[→] Sending install command:\n{command}\n")
-        connection.write_channel(command + "\n")
-        time.sleep(1)
+        print(f"[→] Connecting via SSH to {ip}")
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(ip, username=username, password=password, look_for_keys=False)
 
+        print(f"[→] Sending install command: {command}\n")
+
+        shell = ssh.invoke_shell()
+        shell.send(command + "\n")
+        time.sleep(2)
+
+        success_strings = get_success_strings(model)
         output_log = ""
-        timeout = 900  # 15 minutes max
+        timeout = 900  # 15 mins
         start_time = time.time()
-
-        success_strings = get_success_strings(device["model"])
         found_success = False
-        buffer = ""
+        spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        spin_index = 0
 
         while True:
             if time.time() - start_time > timeout:
-                print("[✖] Timeout waiting for install to complete.")
+                print("\n[✖] Timeout waiting for install to complete.")
                 break
 
-            out = connection.read_channel()
-            if out:
-                print(out, end="")
-                output_log += out
-                buffer += out
+            if shell.recv_ready():
+                output = shell.recv(65535).decode("utf-8", errors="ignore")
+                print(output, end="")
+                output_log += output
 
                 for keyword in success_strings:
-                    if keyword.lower() in buffer.lower():
+                    if keyword.lower() in output.lower():
                         found_success = True
-                        break
 
-                if found_success:
-                    time.sleep(3)  # wait briefly to collect final CLI output
-                    output_log += connection.read_channel()
-                    break
+            if found_success:
+                break
 
+            print(f"\r[⏳] Waiting... {spinner[spin_index % len(spinner)]}", end="", flush=True)
+            spin_index += 1
             time.sleep(1)
 
-        connection.disconnect()
+        ssh.close()
         log_output(device["name"], "phase3-install", output_log)
 
         if found_success:
