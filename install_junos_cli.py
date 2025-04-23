@@ -46,7 +46,7 @@ def get_success_strings(model):
 def install_junos_cli(device, image_filename):
     """
     Installs Junos using Netmiko, handles real-time output.
-    Detects success based on known model strings.
+    Detects success based on known model strings and stops when CLI prompt returns.
     """
     print("\n--- Phase 3: Junos OS Install ---")
 
@@ -59,7 +59,7 @@ def install_junos_cli(device, image_filename):
         )
 
         image_path = f"/var/tmp/{image_filename}"
-        command = f"request system software add {image_path} no-copy no-validate"
+        command = f"request system software add {image_path} no-copy"
 
         print(f"[→] Sending install command:\n{command}\n")
         connection.write_channel(command + "\n")
@@ -71,27 +71,32 @@ def install_junos_cli(device, image_filename):
 
         success_strings = get_success_strings(device["model"])
         found_success = False
+        seen_output = False
 
         while True:
             if time.time() - start_time > timeout:
                 print("[✖] Timeout waiting for install to complete.")
                 break
 
-            # Try reading and nudging every 1 sec
             out = connection.read_channel()
             if out:
-                print(out, end="")  # Real-time display
+                out_stripped = out.strip()
+                if out_stripped:
+                    print(out, end="")
+                    seen_output = True
                 output_log += out
 
                 for keyword in success_strings:
                     if keyword.lower() in out.lower():
                         found_success = True
 
-            connection.write_channel("\n")
-            time.sleep(1)
-
-            if found_success:
-                break
+                if found_success and out_stripped.endswith(">"):
+                    # Device dropped back to prompt after upgrade
+                    break
+            else:
+                if not seen_output:
+                    print(".", end="", flush=True)
+                time.sleep(1)
 
         output_log += connection.read_channel()
         connection.disconnect()
@@ -99,10 +104,10 @@ def install_junos_cli(device, image_filename):
         log_output(device["name"], "phase3-install", output_log)
 
         if found_success:
-            print("[✅] Junos OS upgrade appears successful and pending reboot.")
+            print("\n[✅] Junos OS upgrade appears successful and pending reboot.")
             return True
         else:
-            print("[✖] Could not confirm success string. Manual review recommended.")
+            print("\n[✖] Could not confirm success string. Manual review recommended.")
             return False
 
     except Exception as e:
