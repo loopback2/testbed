@@ -19,7 +19,11 @@ def log_output(device_name, phase, content):
 
 # Model keywords to expected success strings
 SUCCESS_STRINGS = {
-    "QFX5120-YM": ["Host OS upgrade staged", "Install completed"],
+    "QFX5120-YM": [
+        "Host OS upgrade staged",
+        "Reboot the system to complete installation",
+        "Install completed"
+    ],
     "QFX5120-Y": ["activated at next reboot"],
     "EX4300": ["activated at next reboot"],
     "EX4400": ["activated at next reboot"],
@@ -45,8 +49,7 @@ def get_success_strings(model):
 
 def install_junos_cli(device, image_filename):
     """
-    Installs Junos using Netmiko, handles real-time output.
-    Detects success based on known model strings and stops when CLI prompt returns.
+    Installs Junos using Netmiko, captures real-time output, and exits when known success string is seen.
     """
     print("\n--- Phase 3: Junos OS Install ---")
 
@@ -66,7 +69,7 @@ def install_junos_cli(device, image_filename):
         time.sleep(1)
 
         output_log = ""
-        timeout = 900  # 15 minutes max
+        timeout = 900  # 15 minutes
         start_time = time.time()
 
         success_strings = get_success_strings(device["model"])
@@ -89,9 +92,9 @@ def install_junos_cli(device, image_filename):
                 for keyword in success_strings:
                     if keyword.lower() in out.lower():
                         found_success = True
+                        break
 
-                if found_success and out_stripped.endswith(">"):
-                    # Device dropped back to prompt after upgrade
+                if found_success:
                     break
             else:
                 if not seen_output:
