@@ -1,8 +1,8 @@
 from utils.inventory_loader import load_device_config
 from utils.discovery_and_cleanup import discover_and_cleanup
 from utils.scp_transfer import scp_image_to_device
-from utils.install_junos_cli import install_junos_cli  # for QFX models
-from utils.install_ex_cli import install_ex_cli        # for EX models
+from utils.install_junos_cli import install_junos_cli
+from utils.install_ex_cli import install_ex_cli
 import argparse
 import os
 
@@ -42,17 +42,19 @@ def main():
         print("\n--- Phase 2: Skipped via flag ---")
         image_filename = input("[?] Enter filename manually (e.g. junos.tgz): ").strip()
     else:
-        scp_success = scp_image_to_device(device, model)
+        scp_success, image_filename = scp_image_to_device(device, model)
         if not scp_success:
             print("[✖] Phase 2 failed. Aborting.")
             return
-        image_filename = input("[?] Confirm image selected: ").strip()
-        confirm = input("Proceed with install? (y/n): ").strip().lower()
-        if confirm != "y":
-            print("[!] Install aborted by user.")
-            return
 
-    # --- Phase 3: Install Junos OS ---
+    # Confirm the image name before proceeding
+    print(f"\n[?] Confirm image selected: {image_filename}")
+    confirm = input("Proceed with install? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("[!] Aborting upgrade.")
+        return
+
+    # --- Phase 3: Junos OS Install ---
     model_upper = model.upper()
     if "EX4300" in model_upper or "EX4400" in model_upper:
         install_success = install_ex_cli(device, image_filename)
