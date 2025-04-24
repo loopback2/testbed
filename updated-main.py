@@ -2,7 +2,9 @@ from utils.inventory_loader import load_device_config
 from utils.discovery_and_cleanup import discover_and_cleanup
 from utils.scp_transfer import scp_image_to_device
 from utils.install_junos_cli import install_junos_cli
+from utils.install_ex_cli import install_ex_cli  # <-- NEW
 import argparse
+import os
 
 
 def main():
@@ -19,7 +21,7 @@ def main():
     # Load device config
     device = load_device_config("config/device.yml")
 
-    # --- Phase 1: Discovery & Storage Cleanup ---
+    # --- Phase 1: Discovery & Cleanup ---
     if args.skip_cleanup:
         print("\n--- Phase 1: Skipped via flag ---")
         hostname = device["name"]
@@ -40,20 +42,22 @@ def main():
         print("\n--- Phase 2: Skipped via flag ---")
         image_filename = input("[?] Enter filename manually (e.g. junos.tgz): ").strip()
     else:
-        image_filename = scp_image_to_device(device, model)
-        if not image_filename:
+        scp_success = scp_image_to_device(device, model)
+        if not scp_success:
             print("[✖] Phase 2 failed. Aborting.")
             return
-
-    # Confirm image selection before install
-    print(f"\n[?] Confirm image selected: \033[1m{image_filename}\033[0m")
-    choice = input("    Proceed with install? (y/n): ").strip().lower()
-    if choice != "y":
-        print("[✖] Install aborted by user.")
-        return
+        image_filename = input(f"[🗂] Confirm image selected: {scp_success}\nProceed with install? (y/n): ").strip().lower()
+        if image_filename != "y":
+            print("[✖] Install aborted by user.")
+            return
+        image_filename = scp_success
 
     # --- Phase 3: Install Junos OS ---
-    install_success = install_junos_cli(device, image_filename)
+    model_upper = model.upper()
+    if "EX4300" in model_upper or "EX4400" in model_upper:
+        install_success = install_ex_cli(device, image_filename)
+    else:
+        install_success = install_junos_cli(device, image_filename)
 
     if not install_success:
         print("[✖] Phase 3 failed. Upgrade unsuccessful.")
