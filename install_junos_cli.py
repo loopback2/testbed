@@ -5,9 +5,6 @@ import time
 
 
 def log_output(device_name, phase, content):
-    """
-    Logs command output to a timestamped file in the logs directory.
-    """
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_name = device_name.replace(" ", "_")
     log_path = f"logs/{safe_name}-{phase}-{timestamp}.log"
@@ -19,37 +16,26 @@ def log_output(device_name, phase, content):
 
 
 def get_success_strings(model):
-    """
-    Returns a list of known success strings based on the device model.
-    """
     model = model.upper()
-
-    common_strings = [
-        "Install completed",
-        "Validation succeeded",
-        "commit complete",
-        "activated at next reboot",
-        "Host OS upgrade staged",
-        "Reboot the system to complete installation"
-    ]
-
     if "QFX5120" in model and "YM" in model:
-        return common_strings
+        return [
+            "Install completed",
+            "Host OS upgrade staged",
+            "Reboot the system to complete installation"
+        ]
     elif "QFX5120" in model:
-        return common_strings
-    elif "EX4400" in model:
-        return common_strings
-    elif "EX4300" in model:
-        return common_strings
-
+        return ["Install completed", "activated at next reboot"]
+    elif "EX4300" in model or "EX4400" in model:
+        return [
+            "Install completed",
+            "Validation succeeded",
+            "mgd: commit complete",
+            "activated at next reboot"
+        ]
     return ["Install completed"]
 
 
 def install_junos_cli(device, image_filename):
-    """
-    Connects to the Junos device via Netmiko and installs the Junos OS image.
-    Detects success markers in output to determine upgrade completion.
-    """
     print("\n--- Phase 3: Junos OS Install ---")
     try:
         ip = device["ip"]
@@ -73,26 +59,26 @@ def install_junos_cli(device, image_filename):
         time.sleep(2)
 
         output = ""
-        timeout = 600  # 10 minutes
+        timeout = 600  # Up to 10 minutes for large images
         start_time = time.time()
         success_strings = get_success_strings(model)
 
         while True:
             out = connection.read_channel()
             if out:
-                print(out, end="")  # Live terminal output
+                print(out, end="")  # Live feedback
                 output += out
 
-            # Check the full output for any known success strings
-            for s in success_strings:
-                if s.lower() in output.lower():
-                    print(f"\n[✅] Found success string: '{s}'")
-                    connection.disconnect()
-                    log_output(name, "phase3-install", output)
-                    return True
+                # ✅ Scan ENTIRE output for any success indicator
+                for s in success_strings:
+                    if s.lower() in output.lower():
+                        print(f"\n[✅] Found success string: '{s}'")
+                        connection.disconnect()
+                        log_output(name, "phase3-install", output)
+                        return True
 
             if time.time() - start_time > timeout:
-                print("\n[!] Timeout reached. Installation result unclear.")
+                print(f"\n[!] Timeout reached. Installation result unclear.")
                 break
 
             time.sleep(1)
