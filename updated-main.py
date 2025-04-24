@@ -1,5 +1,5 @@
 from utils.inventory_loader import load_device_config
-from utils.discovery_and_cleanup import discover_and_cleanup
+from utils.discovery_and_cleanup import discover_and_cleanup, discover_only
 from utils.scp_transfer import scp_image_to_device
 from utils.install_junos_cli import install_junos_cli
 from utils.install_ex_cli import install_ex_cli
@@ -23,10 +23,11 @@ def main():
 
     # --- Phase 1: Discovery & Storage Cleanup ---
     if args.skip_cleanup:
-        print("\n--- Phase 1: Skipped via flag ---")
-        hostname = device["name"]
-        model = device.get("model", "UNKNOWN")
-        version = device.get("version", "UNKNOWN")
+        print("\n--- Phase 1: Skipped cleanup, running silent discovery ---")
+        success, hostname, model, version = discover_only(device)
+        if not success:
+            print("[✖] Phase 1 discovery failed. Aborting.")
+            return
     else:
         success, hostname, model, version = discover_and_cleanup(device)
         if not success:
@@ -42,19 +43,21 @@ def main():
         print("\n--- Phase 2: Skipped via flag ---")
         image_filename = input("[?] Enter filename manually (e.g. junos.tgz): ").strip()
     else:
-        scp_success = scp_image_to_device(device, model)
+        scp_success, image_filename = scp_image_to_device(device, model)
         if not scp_success:
             print("[✖] Phase 2 failed. Aborting.")
             return
-        image_filename = input("[?] Confirm image selected: ").strip()
-        confirm = input(f"[?] Confirm image selected: {image_filename}\nProceed with install? (y/n): ").strip().lower()
-        if confirm != "y":
-            print("[✖] Install aborted by user.")
-            return
+
+    # Confirm image name before install
+    print(f"[?] Confirm image selected: {image_filename}")
+    confirm = input("Proceed with install? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("[✖] Install aborted by user.")
+        return
 
     # --- Phase 3: Install Junos OS ---
     model_upper = model.upper()
-    if "EX4300" in model_upper or "EX4400" in model_upper:
+    if "EX4400" in model_upper:
         print("[→] Using EX install method")
         install_success = install_ex_cli(device, image_filename)
     else:
