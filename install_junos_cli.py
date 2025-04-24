@@ -28,12 +28,6 @@ def get_success_strings(model):
             "Install completed",
             "activated at next reboot",
         ]
-    elif "EX4300" in model or "EX4400" in model:
-        return [
-            "Validation succeeded",
-            "activated at next reboot",
-            "commit complete",
-        ]
     return ["Install completed"]
 
 
@@ -61,38 +55,24 @@ def install_junos_cli(device, image_filename):
         time.sleep(2)
 
         output = ""
-        timeout = 600  # 10 minutes total runtime max
-        last_update = time.time()
-        success_strings = get_success_strings(model)
-        spinner = ["|", "/", "-", "\\"]
-        spinner_index = 0
-
-        print("[⏳] Monitoring output. Waiting for success...", end="", flush=True)
+        timeout = 600
         start_time = time.time()
+        success_strings = get_success_strings(model)
+
         while True:
             out = connection.read_channel()
             if out:
+                print(out, end="")  # live real-time stream
                 output += out
-                last_update = time.time()
-
-                print(
-                    f"\r[⏳] {spinner[spinner_index % 4]} Waiting for install success...",
-                    end="",
-                    flush=True,
-                )
-                spinner_index += 1
 
                 for s in success_strings:
-                    if s.lower() in output.lower():
+                    if s.lower() in out.lower():
                         print(f"\n[✅] Found success string: '{s}'")
                         connection.disconnect()
                         log_output(name, "phase3-install", output)
                         return True
 
-            elapsed = time.time() - start_time
-            no_update_for = time.time() - last_update
-
-            if elapsed > timeout and no_update_for > 10:
+            if time.time() - start_time > timeout:
                 print("\n[!] Timeout reached. Installation result unclear.")
                 break
 
