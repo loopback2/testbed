@@ -1,84 +1,71 @@
-from datetime import datetime
-import os
+# install_junos_cli.py
+
 from netmiko import ConnectHandler
+import os
 import time
+from datetime import datetime
+from colorama import Fore, Style
 
-def log_output(device_name, phase, content):
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    safe_name = device_name.replace(" ", "_")
-    log_path = f"logs/{safe_name}-{phase}-{timestamp}.log"
-    os.makedirs("logs", exist_ok=True)
-    with open(log_path, "w") as f:
-        f.write(content)
-    print(f"[💾] Log saved to: {log_path}")
-    return log_path
-
-def get_success_strings(model):
-    model = model.upper()
-    if "QFX5120" in model and "YM" in model:
-        return [
-            "Install completed",
-            "Host OS upgrade staged",
-            "Reboot the system to complete installation"
-        ]
-    elif "QFX5120" in model:
-        return ["Install completed", "activated at next reboot"]
-    elif "EX4300" in model or "EX4400" in model:
-        return ["Install completed", "activated at next reboot"]
-    return ["Install completed"]
+# Success markers that can be seen across various models
+SUCCESS_MARKERS = [
+    "Install completed",
+    "Validation succeeded",
+    "commit complete",
+    "will be activated at next reboot",
+    "Upgrade package verification succeeded"
+]
 
 def install_junos_cli(device, image_filename):
-    print("\n--- Phase 3: Junos OS Install ---")
-    try:
-        ip = device["ip"]
-        username = device["username"]
-        password = device["password"]
-        model = device["model"]
-        name = device["name"]
-        image_path = f"/var/tmp/{image_filename}"
-        command = f"request system software add {image_path} no-copy"
+    """
+    Installs Junos OS on a Juniper device using CLI via Netmiko.
+    Saves full session log and returns success/failure.
+    """
+    # Prepare command and session log file
+    install_command = f"request system software add /var/tmp/{image_filename}"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    hostname = device.get("hostname", "unknown")
+    log_file = f"logs/{hostname}-phase3-install-{timestamp}.log"
 
-        print(f"[→] Connecting via Netmiko to {ip}...")
-        connection = ConnectHandler(
+    print(f"\n--- Phase 3: Junos OS Install ---")
+    print(f"{Fore.CYAN}[→] Connecting via Netmiko to {device['ip']}...{Style.RESET_ALL}")
+
+    try:
+        conn = ConnectHandler(
             device_type="juniper",
-            host=ip,
-            username=username,
-            password=password,
+            host=device["ip"],
+            username=device["username"],
+            password=device["password"],
+            fast_cli=False,
         )
 
-        print(f"[📦] Sending install command: {command}\n")
-        connection.write_channel(command + "\n")
-        time.sleep(2)
+        print(f"{Fore.CYAN}[⚙️] Sending install command: {install_command}{Style.RESET_ALL}")
+        output = conn.send_command(
+            install_command,
+            expect_string=r"[>#]",
+            read_timeout=600,
+            delay_factor=5
+        )
 
-        output = ""
-        timeout = 600  # Increased from 300 to 600 seconds (10 minutes)
-        start_time = time.time()
-        success_strings = get_success_strings(model)
+        # Save raw output
+        with open(log_file, "w") as f:
+            f.write(output)
 
-        while True:
-            out = connection.read_channel()
-            if out:
-                print(out, end="")  # Optional: live output to terminal
-                output += out
-
-                for s in success_strings:
-                    if s.lower() in out.lower():
-                        print(f"\n[✅] Found success string: '{s}'")
-                        connection.disconnect()
-                        log_output(name, "phase3-install", output)
-                        return True
-
-            if time.time() - start_time > timeout:
-                print(f"\n[!] Timeout reached. Installation result unclear.")
+        # Check for known success markers
+        found_marker = False
+        for marker in SUCCESS_MARKERS:
+            if marker.lower() in output.lower():
+                print(f"{Fore.GREEN}[✓] Found success string: '{marker}'{Style.RESET_ALL}")
+                found_marker = True
                 break
 
-            time.sleep(1)
-
-        connection.disconnect()
-        log_output(name, "phase3-install", output)
-        print(f"[✖] Installation may have failed. Review log file.")
-        return False
+        if found_marker:
+            print(f"{Fore.CYAN}[🗂] Log saved to: {log_file}{Style.RESET_ALL}")
+            return True
+        else:
+            print(f"{Fore.YELLOW}[!] Junos OS install output did not match known success markers. Review log.{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[🗂] Log saved to: {log_file}{Style.RESET_ALL}")
+            return False
 
     except Exception as e:
-        print(f"[✖] Installation failed: {e}")
+        print(f"{Fore.RED}[✖] Installation failed: {e}{Style.RESET_ALL}")
         return False
