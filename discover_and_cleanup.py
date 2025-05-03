@@ -1,5 +1,5 @@
 from jnpr.junos import Device
-from jnpr.junos.utils.start_shell import StartShell
+from netmiko import ConnectHandler
 from lxml import etree
 from datetime import datetime
 import os
@@ -19,31 +19,38 @@ def discover_and_cleanup(device):
     hostname = model = version = None
 
     try:
-        with Device(host=device["ip"], user=device["username"], passwd=device["password"]) as dev:
-            # Run storage cleanup
-            shell = StartShell(dev)
-            shell.open()
+        # Run storage cleanup using Netmiko
+        netmiko_device = {
+            "device_type": "juniper",
+            "host": device["ip"],
+            "username": device["username"],
+            "password": device["password"],
+        }
 
-            # Ensure CLI mode
-            shell.run("cli")
-
+        try:
+            print(f"[↪] Connecting via Netmiko to run cleanup...")
+            net_connect = ConnectHandler(**netmiko_device)
             cleanup_cmd = "request system storage cleanup no-confirm"
             print(f"[↪] Running: {cleanup_cmd}")
-            output = shell.run(cleanup_cmd)[1]
-            shell.close()
+            output = net_connect.send_command(cleanup_cmd, expect_string=r"#")
+            net_connect.disconnect()
 
             if "command not found" in output.lower() or "error" in output.lower():
                 print("[✖] Storage cleanup failed. See log for details.")
             else:
                 print("[✓] Storage cleanup completed.")
+        except Exception as e:
+            output = f"[✖] Netmiko connection or command failed: {e}"
+            print(output)
 
-            # Get hostname
+        # Get device facts using PyEZ
+        with Device(host=device["ip"], user=device["username"], passwd=device["password"]) as dev:
             hostname = dev.facts.get("hostname", "UNKNOWN")
             model = dev.facts.get("model", "UNKNOWN")
             version = dev.facts.get("version", "UNKNOWN")
 
-            output += f"\nHostname: {hostname}\nModel: {model}\nVersion: {version}\n"
-            log_output(hostname, "phase1-discovery-cleanup", output)
+        output += f"\nHostname: {hostname}\nModel: {model}\nVersion: {version}\n"
+        log_output(hostname, "phase1-discovery-cleanup", output)
 
         return True, hostname, model, version
 
