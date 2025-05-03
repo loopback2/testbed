@@ -23,11 +23,19 @@ def discover_and_cleanup(device):
             # Run storage cleanup
             shell = StartShell(dev)
             shell.open()
+
+            # Ensure CLI mode
+            shell.run("cli")
+
             cleanup_cmd = "request system storage cleanup no-confirm"
             print(f"[↪] Running: {cleanup_cmd}")
             output = shell.run(cleanup_cmd)[1]
             shell.close()
-            print("[✓] Storage cleanup completed.")
+
+            if "command not found" in output.lower() or "error" in output.lower():
+                print("[✖] Storage cleanup failed. See log for details.")
+            else:
+                print("[✓] Storage cleanup completed.")
 
             # Get hostname
             hostname = dev.facts.get("hostname", "UNKNOWN")
