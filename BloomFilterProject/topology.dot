@@ -1,0 +1,37 @@
+digraph G {
+  layout=dot;
+  rankdir=TB;
+  dpi=150;
+  splines=polyline;
+  pad=0.5;
+  nodesep=1.2;
+  ranksep=1.2;
+  size="20,10";
+  node [shape=box style=filled fontname=Helvetica fontsize=14];
+  "R1" -> "R3" [dir=none label="xe-0/0/0 ⟷ xe-0/0/1"];
+  "R1" -> "R4" [dir=none label="xe-0/0/1 ⟷ xe-0/0/0"];
+  "R1" -> "R5" [dir=none label="xe-0/0/2 ⟷ xe-0/0/0"];
+  "R1" -> "R6" [dir=none label="xe-0/0/3 ⟷ xe-0/0/0"];
+  "R2" -> "R3" [dir=none label="xe-0/0/0 ⟷ xe-0/0/1"];
+  "R2" -> "R4" [dir=none label="xe-0/0/1 ⟷ xe-0/0/1"];
+  "R2" -> "R5" [dir=none label="xe-0/0/2 ⟷ xe-0/0/1"];
+  "R2" -> "R6" [dir=none label="xe-0/0/3 ⟷ xe-0/0/1"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R4" -> "SW1" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "R6" -> "SW2" [dir=none label="xe-0/0/3 ⟷ ge-0/0/0"];
+  "SW2" [fillcolor=white];
+  "R2" [fillcolor=khaki];
+  "R5" [fillcolor=gray];
+  "R6" [fillcolor=gray];
+  "R4" [fillcolor=gray];
+  "R3" [fillcolor=gray];
+  "SW1" [fillcolor=white];
+  "R1" [fillcolor=khaki];
+  { rank=same; "R5" "R6" "R4" "R3" }
+  { rank=same; "R2" "R1" }
+  { rank=same; "SW2" "SW1" }
+}
